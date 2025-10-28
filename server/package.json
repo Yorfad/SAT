@@ -5,7 +5,7 @@
   "type": "commonjs",
   "main": "dist/app.js",
   "scripts": {
-    "dev": "tsx src/app.ts",
+    "dev": "ts-node-dev --respawn --transpile-only src/app.ts",
     "probe": "tsx src/prueba.ts",
     "build": "tsc",
     "start": "node dist/app.js"
