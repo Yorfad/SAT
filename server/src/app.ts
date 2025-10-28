@@ -1,26 +1,51 @@
-// src/app.ts
-import express from "express";
-import cors from "cors";
-import { config } from "dotenv"; config();
+import express, { Application, Request, Response, NextFunction } from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import apiRoutes from './api/routes';
+import { ApiError } from './utils/apiError';
 
-import authRoutes from "./modules/auth/auth.routes";
-import clientsRoutes from "./modules/clients/clients.routes";
-import invoicesRoutes from "./modules/invoices/invoices.routes";
+// Cargar variables de entorno
+dotenv.config();
 
-const app = express();
-app.use(cors({ origin: process.env.CORS_ORIGIN || "*" }));
-app.use(express.json());
+const app: Application = express();
+const port = process.env.PORT || 3001;
 
-app.get("/api/health", (_req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
+// Middlewares básicos
+app.use(cors()); // Habilitar CORS para permitir peticiones del frontend
+app.use(express.json()); // Parsear cuerpos de petición en formato JSON
+app.use(express.urlencoded({ extended: true })); // Parsear cuerpos de petición URL-encoded
 
-app.use("/api/auth", authRoutes);
-app.use("/api/admin/clients", clientsRoutes);
-app.use("/api/admin/invoices", invoicesRoutes);
+// Ruta de bienvenida
+app.get('/', (req: Request, res: Response) => {
+    res.send('API del Sistema de Gestión Tributaria funcionando!');
+});
 
-// Si usas storage local y quieres exponerlo:
-import path from "path";
-app.use("/media", express.static(path.join(__dirname, "..", "storage")));
+// Registrar todas las rutas de la API bajo el prefijo /api
+app.use('/api', apiRoutes);
 
-app.listen(process.env.PORT || 4000, () => {
-  console.log(`API lista en http://localhost:${process.env.PORT || 4000}`);
+
+// Middleware para manejar rutas no encontradas (404)
+app.use((req: Request, res: Response, next: NextFunction) => {
+    next(new ApiError(404, 'Ruta no encontrada'));
+});
+
+// Middleware para manejar todos los errores
+app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+    if (err instanceof ApiError) {
+        return res.status(err.statusCode).json({
+            message: err.message,
+            errors: err.errors,
+        });
+    }
+    
+    // Para errores inesperados del servidor
+    console.error(err); // Loguear el error para depuración
+    return res.status(500).json({
+        message: 'Error interno del servidor',
+    });
+});
+
+
+app.listen(port, () => {
+    console.log(`Servidor API escuchando en http://localhost:${port}`);
 });
