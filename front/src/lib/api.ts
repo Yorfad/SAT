@@ -2,10 +2,9 @@ import axios from "axios";
 import { detectTenant } from "./tenant";
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL,
-  withCredentials: false,
+  baseURL: import.meta.env.VITE_API_URL, // ← incluye /api
+  headers: { 'Content-Type': 'application/json' }
 });
-
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("token");
   const tenant = detectTenant();

@@ -1,11 +1,13 @@
+// src/context/AuthContext.tsx
 import { createContext, useContext, useEffect, useState } from 'react'
 import type { User, LoginResponse } from '../types'
+import api from '../lib/api'
 
 type AuthCtx = {
   user: User | null
   token: string | null
   initialized: boolean
-  login: (r: LoginResponse) => void
+  login: (email: string, password: string, tenant?: string) => Promise<void>
   logout: () => void
 }
 
@@ -23,11 +25,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setInitialized(true)
   }, [])
 
-  const login = (resp: LoginResponse) => {
-    setToken(resp.token)
-    setUser(resp.user)
-    localStorage.setItem('token', resp.token)
-    localStorage.setItem('user', JSON.stringify(resp.user))
+  const login = async (email: string, password: string, tenant?: string) => {
+    const resp = await api.post<LoginResponse>(
+      '/auth/login',
+      { email, password },
+      { headers: { 'X-Tenant': tenant || 'acme' } } // default opcional
+    )
+    setToken(resp.data.token)
+    setUser(resp.data.user)
+    localStorage.setItem('token', resp.data.token)
+    localStorage.setItem('user', JSON.stringify(resp.data.user))
   }
 
   const logout = () => {

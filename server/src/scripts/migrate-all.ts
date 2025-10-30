@@ -5,7 +5,8 @@ import { env } from "../config/env";
 
 
 type TenantCfg = { database: string };
-const TENANTS: Record<string, TenantCfg> = JSON.parse(env.tenants);
+const TENANTS: Record<string, TenantCfg> =
+typeof env.tenants === "string" ? JSON.parse(env.tenants) : env.tenants;
 
 
 (async () => {
