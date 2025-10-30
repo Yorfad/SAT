@@ -16,6 +16,7 @@ export default function LoginPage(){
   const onSubmit = async (e:React.FormEvent) => {
     e.preventDefault();
     setLoading(true); setErr(null);
+    setTenant(tenant);
     try{
       await login(email,password,tenant || undefined);
       nav(loc.state?.from?.pathname ?? "/");

@@ -1,5 +1,5 @@
 import axios from "axios";
-import { detectTenant } from "./tenant";
+import { detectTenant, getTenant } from "./tenant";
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL, // ← incluye /api
@@ -7,9 +7,11 @@ const api = axios.create({
 });
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("token");
-  const tenant = detectTenant();
   if (token) config.headers.Authorization = `Bearer ${token}`;
-  if (tenant) config.headers["X-Tenant"] = tenant;
+
+   const tenant = getTenant();
+  if (tenant) config.headers['X-Tenant'] = tenant;
+
   return config;
 });
 

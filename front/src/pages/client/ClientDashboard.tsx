@@ -6,7 +6,7 @@ import { money, ym } from "../../utils/format";
 export default function ClientDashboard(){
   const { data } = useQuery({
     queryKey:["client-dashboard"],
-    queryFn: async ()=> (await api.get("/client/dashboard")).data
+    queryFn: async ()=> (await api.get("/clients/dashboard")).data
   });
 
   const invoices: Invoice[] = data?.invoices ?? [];

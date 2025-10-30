@@ -6,7 +6,6 @@ import morgan from "morgan";
 import rateLimit from "express-rate-limit";
 import { env } from "./config/env";
 
-
 import publicRoutes from "./routes/public.routes";
 import authRoutes from "./routes/auth.routes";
 import clientsRoutes from "./routes/clients.routes";
@@ -45,7 +44,7 @@ app.use("/api/invoices", invoicesRoutes);
 
 
 app.get("/api/health", (_req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
-
+app.use("/api/public", publicRoutes);
 
 app.use(errorHandler);
 

@@ -6,7 +6,7 @@ import { money, ym } from "../../utils/format";
 export default function InvoicesPage(){
   const { data } = useQuery({
     queryKey:["my-invoices"],
-    queryFn: async ()=> (await api.get<Invoice[]>("/client/invoices")).data
+    queryFn: async ()=> (await api.get<Invoice[]>("/clients/invoices")).data
   });
   const invoices = data ?? [];
   return (

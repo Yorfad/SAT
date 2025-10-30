@@ -22,7 +22,7 @@ export default function AppLayout(){
           )}
           {user?.role === "client" && (
             <>
-              <NavLink to="/client" className="hover:underline">Mi panel</NavLink>
+              <NavLink to="/clients" className="hover:underline">Mi panel</NavLink>
               <NavLink to="/invoices" className="hover:underline">Mis facturas</NavLink>
             </>
           )}
