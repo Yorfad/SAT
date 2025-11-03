@@ -7,3 +7,8 @@ const [[row]]: any = await db.query(`SELECT display_name, logo_url, theme_json, 
 if (!row) return res.json({ display_name: "Sin configurar", logo_url: null, theme: {}, features: [] });
 res.json({ display_name: row.display_name, logo_url: row.logo_url, theme: row.theme_json || {}, features: row.features_json || [] });
 }
+
+export async function getPublicSettings(req: Request, res: Response) {
+  const [[settings]]: any = await req.db!.query(`SELECT display_name, logo_url, theme_json, features_json FROM settings LIMIT 1`);
+  res.json(settings);
+}

@@ -28,3 +28,7 @@ export function setTenant(slug: string) {
 export function clearTenant() {
   localStorage.removeItem('tenant');
 }
+
+export function resolveTenant() {
+  return getTenant() ?? detectTenant()
+}

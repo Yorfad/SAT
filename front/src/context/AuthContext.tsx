@@ -34,6 +34,7 @@ const login = async (email: string, password: string, tenant?: string) => {
   setToken(resp.data.token);
   setUser(resp.data.user);
   localStorage.setItem("token", resp.data.token);
+  localStorage.setItem("user", JSON.stringify(resp.data.user));
   if (tenant) setTenant(tenant); // <-- guarda el tenant
 };
 

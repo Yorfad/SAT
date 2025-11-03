@@ -15,3 +15,5 @@ export function useSettings() {
     }
   });
 }
+
+// Nota: hooks de brigada están en `front/src/hooks/useBrigade.ts`

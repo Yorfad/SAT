@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cat:*)",
+      "Bash(find:*)",
+      "Bash(npm run dev:*)",
+      "Bash(npm run migrate:*)",
+      "Bash(npx ts-node:*)",
+      "Bash(taskkill:*)",
+      "Bash(nul)",
+      "Bash(node -e:*)",
+      "Bash(node scripts/generate-seed.js:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run reset-db:*)",
+      "Bash(npm install:*)",
+      "Bash(mysql:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

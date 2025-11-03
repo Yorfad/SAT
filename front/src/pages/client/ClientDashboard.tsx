@@ -4,10 +4,13 @@ import type { Invoice } from '../../types';
 import { money, ym } from "../../utils/format";
 
 export default function ClientDashboard(){
-  const { data } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey:["client-dashboard"],
     queryFn: async ()=> (await api.get("/clients/dashboard")).data
   });
+
+   if (isLoading) return <div>Cargando…</div>;
+  if (error) return <div className="text-red-600">Error: {(error as any)?.response?.data?.message || (error as any).message}</div>;
 
   const invoices: Invoice[] = data?.invoices ?? [];
 

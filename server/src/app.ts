@@ -11,6 +11,9 @@ import authRoutes from "./routes/auth.routes";
 import clientsRoutes from "./routes/clients.routes";
 import servicesRoutes from "./routes/services.routes";
 import invoicesRoutes from "./routes/invoices.routes";
+import boardRoutes from "./routes/board.routes";
+import myClientsRoutes from "./routes/my-clients.routes";
+import observationsRoutes from "./routes/observations.routes";
 
 
 import { resolveTenant } from "./middleware/resolveTenant";
@@ -41,13 +44,21 @@ app.use("/api/auth", authLimiter, authRoutes);
 app.use("/api/clients", clientsRoutes);
 app.use("/api/services", servicesRoutes);
 app.use("/api/invoices", invoicesRoutes);
+app.use("/api/board", boardRoutes);
+app.use("/api/my-clients", myClientsRoutes);
+app.use("/api/observations", observationsRoutes);
 
 
 app.get("/api/health", (_req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
-app.use("/api/public", publicRoutes);
 
 app.use(errorHandler);
 
+// Iniciar scheduler de tareas (solo si no estamos en modo test)
+if (process.env.NODE_ENV !== 'test') {
+  import('./jobs/start-scheduler').catch((err) => {
+    console.warn('No se pudo iniciar el scheduler:', err.message);
+  });
+}
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`API running on :${PORT}`));

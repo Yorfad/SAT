@@ -5,6 +5,9 @@ export interface User {
   full_name: string;
   email: string;
   role: Role;
+  is_active?: number;
+  deactivation_reason?: string;
+  deactivated_at?: string;
 }
 
 export interface LoginResponse {
@@ -37,3 +40,27 @@ export interface Invoice {
   balance: number;
   payment_status: "paid" | "pending" | "overdue" | "partial";
 }
+
+export type BrigadeRow = {
+  client_id: number;
+  name: string;
+  nit: string | null;
+  sat_password: string | null;
+
+  invoice: null | {
+    id: number;
+    year: number;
+    month: number;
+    total_due: number;
+    amount_paid: number;
+    balance: number;
+    payment_status: string;
+    observations: string;
+  };
+
+  artifacts: { factura: boolean; rectificador: boolean };
+
+  checklist: { id: number; service_id: number; name: string; status: 'done'|'todo' }[];
+
+  checklist_progress: { done: number; total: number; ok: boolean };
+};

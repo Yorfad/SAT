@@ -4,8 +4,13 @@ import fs from "fs";
 import { randomUUID } from "crypto";
 import { env } from "./env";
 
+// Usar path absoluto basado en __dirname en lugar de path relativo desde CWD
+// Esto asegura que siempre resuelva correctamente sin importar desde dónde se ejecute
+const uploadRoot = env.uploadDir.startsWith('.')
+  ? path.join(__dirname, '../../uploads')
+  : env.uploadDir;
 
-const uploadRoot = env.uploadDir;
+console.log('[UPLOAD-CONFIG] Upload directory:', uploadRoot);
 
 
 const storage = multer.diskStorage({

@@ -25,15 +25,28 @@ export async function login(req: Request, res: Response) {
 const db = req.db!;
 const { email, password } = req.body;
 const [rows] = await db.query(
-`SELECT id, email, password_hash, full_name, role, is_active FROM users WHERE email=? LIMIT 1`,
+`SELECT id, email, password_hash, full_name, role, is_active, deactivation_reason, deactivated_at FROM users WHERE email=? LIMIT 1`,
 [email]
 );
 const u = (rows as any[])[0];
-if (!u || !u.is_active) return res.status(401).json({ message: "Credenciales inválidas" });
+
+// Verificar que el usuario existe
+if (!u) return res.status(401).json({ message: "Credenciales inválidas" });
+
+// Verificar contraseña
 const ok = await bcrypt.compare(password, u.password_hash);
 if (!ok) return res.status(401).json({ message: "Credenciales inválidas" });
 
-const secret: Secret = env.jwtSecret;           // string seguro
+// Verificar si el cliente está desactivado
+if (!u.is_active) {
+  return res.status(403).json({
+    message: "Cuenta desactivada",
+    reason: u.deactivation_reason || "No especificado",
+    deactivated_at: u.deactivated_at
+  });
+}
+
+const secret: Secret = env.jwtSecret;
 const opts: SignOptions = { expiresIn: env.jwtExpiresIn };
 
 const token = jwt.sign(
@@ -41,5 +54,15 @@ const token = jwt.sign(
   secret,
   opts
 );
-res.json({ token, user: { id: u.id, name: u.full_name, email: u.email, role: u.role }, tenant: req.tenantSlug });
+res.json({
+  token,
+  user: {
+    id: u.id,
+    full_name: u.full_name,
+    email: u.email,
+    role: u.role,
+    is_active: u.is_active
+  },
+  tenant: req.tenantSlug
+});
 }
