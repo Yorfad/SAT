@@ -3,6 +3,7 @@ import { authenticateToken } from "../middleware/auth";
 import { requireRoles } from "../middleware/rbac";
 import { validate } from "../middleware/validate";
 import { z } from "zod";
+import { resolveWorkspace, loadWorkspaceId } from "../middleware/resolveWorkspace";
 import {
   listClients,
   getClientById,
@@ -20,6 +21,8 @@ import {
 
 const router = Router();
 router.use(authenticateToken);
+router.use(resolveWorkspace);
+router.use(loadWorkspaceId);
 
 router.get("/dashboard", requireRoles("client"), getClientDashboard);
 router.get("/", requireRoles("admin","employee"), listClients);

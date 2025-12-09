@@ -11,16 +11,28 @@ function computeBaseUrl(): string {
   return url;
 }
 
+// Función para obtener el workspace actual del localStorage
+function getCurrentWorkspace(): string | null {
+  const consolidated = localStorage.getItem('consolidatedView');
+  if (consolidated === 'true') return 'all';
+  return localStorage.getItem('currentWorkspace');
+}
+
 const api = axios.create({
   baseURL: computeBaseUrl(),
   headers: { 'Content-Type': 'application/json' }
 });
+
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("token");
   if (token) config.headers.Authorization = `Bearer ${token}`;
-    
+
   const tenant = resolveTenant();
-if (tenant) config.headers['X-Tenant'] = tenant;
+  if (tenant) config.headers['X-Tenant'] = tenant;
+
+  // Agregar header de workspace
+  const workspace = getCurrentWorkspace();
+  if (workspace) config.headers['X-Workspace'] = workspace;
 
   return config;
 });

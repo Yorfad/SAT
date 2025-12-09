@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import jwt, { Secret, SignOptions } from "jsonwebtoken";
 import { env } from "../config/env";
+import { WorkspaceService } from "../services/workspace.service";
 
 
 export async function register(req: Request, res: Response) {
@@ -49,8 +50,19 @@ if (!u.is_active) {
 const secret: Secret = env.jwtSecret;
 const opts: SignOptions = { expiresIn: env.jwtExpiresIn };
 
+// Obtener workspace primario del usuario
+const workspaceService = new WorkspaceService(db);
+const primaryWorkspace = await workspaceService.getPrimaryWorkspace(u.id);
+const userWorkspaces = await workspaceService.getUserWorkspaces(u.id);
+
 const token = jwt.sign(
-  { sub: u.id, role: u.role, name: u.full_name, tenant: req.tenantSlug },
+  {
+    sub: u.id,
+    role: u.role,
+    name: u.full_name,
+    tenant: req.tenantSlug,
+    defaultWorkspace: primaryWorkspace?.slug || null
+  },
   secret,
   opts
 );
@@ -61,7 +73,9 @@ res.json({
     full_name: u.full_name,
     email: u.email,
     role: u.role,
-    is_active: u.is_active
+    is_active: u.is_active,
+    default_workspace: primaryWorkspace,
+    workspaces: userWorkspaces
   },
   tenant: req.tenantSlug
 });

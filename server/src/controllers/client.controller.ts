@@ -1,11 +1,43 @@
 import { Request, Response } from "express";
 import { encrypt } from "../utils/encryption";
+import { WorkspaceService } from "../services/workspace.service";
+import { buildWorkspaceFilter } from "../middleware/resolveWorkspace";
 
 export async function listClients(req: Request, res: Response) {
-const [rows] = await req.db!.query(
-`SELECT id, full_name, email, phone_number, nit, role, is_active FROM users WHERE role='client' ORDER BY full_name`
-);
-res.json(rows);
+  const isConsolidated = req.isConsolidatedView;
+  const workspaceId = req.workspaceId;
+  const userId = (req as any).user?.id;
+
+  let query = `
+    SELECT u.id, u.full_name, u.email, u.phone_number, u.nit, u.role, u.is_active,
+           cp.workspace_id, w.name as workspace_name, w.color as workspace_color
+    FROM users u
+    LEFT JOIN clients_profiles cp ON cp.user_id = u.id
+    LEFT JOIN workspaces w ON w.id = cp.workspace_id
+    WHERE u.role='client'
+  `;
+
+  const params: any[] = [];
+
+  // Filtrar por workspace
+  if (!isConsolidated && workspaceId) {
+    query += ` AND cp.workspace_id = ?`;
+    params.push(workspaceId);
+  } else if (isConsolidated && userId) {
+    // En vista consolidada, filtrar por workspaces accesibles
+    const workspaceService = new WorkspaceService(req.db!);
+    const accessibleIds = await workspaceService.getAccessibleWorkspaceIds(userId);
+    if (accessibleIds.length > 0) {
+      const placeholders = accessibleIds.map(() => '?').join(',');
+      query += ` AND cp.workspace_id IN (${placeholders})`;
+      params.push(...accessibleIds);
+    }
+  }
+
+  query += ` ORDER BY u.full_name`;
+
+  const [rows] = await req.db!.query(query, params);
+  res.json(rows);
 }
 
 export async function getClientById(req: Request, res: Response) {
@@ -34,31 +66,31 @@ res.json({ client, profile: profile || null, invoices });
 }
 
 export async function upsertClientProfile(req: Request, res: Response) {
-const { id } = req.params;
-const { contract_number = null, sat_password, overall_rating = null, notes = null } = req.body;
+  const { id } = req.params;
+  const { contract_number = null, sat_password, overall_rating = null, notes = null } = req.body;
+  const workspaceId = req.workspaceId;
 
+  const [[exists]]: any = await req.db!.query(`SELECT user_id FROM clients_profiles WHERE user_id=?`, [id]);
+  const satEnc = sat_password ? encrypt(sat_password) : null;
 
-const [[exists]]: any = await req.db!.query(`SELECT user_id FROM clients_profiles WHERE user_id=?`, [id]);
-const satEnc = sat_password ? encrypt(sat_password) : null;
-
-
-if (exists) {
-await req.db!.query(
-`UPDATE clients_profiles
-SET contract_number=COALESCE(?, contract_number),
-${satEnc ? "sat_password_encrypted=?" : "sat_password_encrypted=sat_password_encrypted"},
-overall_rating=COALESCE(?, overall_rating),
-notes=COALESCE(?, notes)
-WHERE user_id=?`,
-satEnc ? [contract_number, satEnc, overall_rating, notes, id] : [contract_number, overall_rating, notes, id]
-);
-} else {
-await req.db!.query(
-`INSERT INTO clients_profiles (user_id, contract_number, sat_password_encrypted, overall_rating, notes) VALUES (?,?,?,?,?)`,
-[id, contract_number, satEnc, overall_rating, notes]
-);
-}
-res.json({ ok: true });
+  if (exists) {
+    await req.db!.query(
+      `UPDATE clients_profiles
+      SET contract_number=COALESCE(?, contract_number),
+      ${satEnc ? "sat_password_encrypted=?" : "sat_password_encrypted=sat_password_encrypted"},
+      overall_rating=COALESCE(?, overall_rating),
+      notes=COALESCE(?, notes)
+      WHERE user_id=?`,
+      satEnc ? [contract_number, satEnc, overall_rating, notes, id] : [contract_number, overall_rating, notes, id]
+    );
+  } else {
+    // Al crear nuevo perfil, asignar workspace
+    await req.db!.query(
+      `INSERT INTO clients_profiles (user_id, workspace_id, contract_number, sat_password_encrypted, overall_rating, notes) VALUES (?,?,?,?,?,?)`,
+      [id, workspaceId, contract_number, satEnc, overall_rating, notes]
+    );
+  }
+  res.json({ ok: true });
 }
 
 export async function listClientServices(req: Request, res: Response) {

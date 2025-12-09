@@ -18,8 +18,10 @@ import ClientDashboard from './pages/client/ClientDashboard';
 import InvoicesPage from './pages/common/InvoicesPage';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import FinancialManagementPage from './pages/admin/FinancialManagementPage';
+import WorkspacesPage from './pages/admin/WorkspacesPage';
 
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { WorkspaceProvider } from './context/WorkspaceContext';
 import './index.css';
 
 // Redirección inteligente según rol
@@ -108,6 +110,14 @@ const router = createBrowserRouter([
           </Protected>
         ),
       },
+      {
+        path: 'admin/workspaces',
+        element: (
+          <Protected roles={['admin']}>
+            <WorkspacesPage />
+          </Protected>
+        ),
+      },
 
       // Cliente
       {
@@ -142,7 +152,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <RouterProvider router={router} />
+        <WorkspaceProvider>
+          <RouterProvider router={router} />
+        </WorkspaceProvider>
       </AuthProvider>
       {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
     </QueryClientProvider>

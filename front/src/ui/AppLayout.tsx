@@ -1,6 +1,7 @@
 import { Outlet, NavLink } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useSettings } from "../hooks/useSettings";
+import WorkspaceSelector from "./WorkspaceSelector";
 
 export default function AppLayout() {
   const { user, logout } = useAuth();
@@ -28,6 +29,13 @@ export default function AppLayout() {
             </div>
           </div>
         </div>
+
+        {/* Selector de Workspace */}
+        {(user?.role === 'admin' || user?.role === 'employee') && (
+          <div className="px-4 py-3 border-b border-slate-800">
+            <WorkspaceSelector />
+          </div>
+        )}
 
         {/* Navegación */}
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">

@@ -25,9 +25,11 @@ import clientPoolRoutes from "./routes/client-pool.routes";
 import clientPrioritiesRoutes from "./routes/client-priorities.routes";
 import userManagementRoutes from "./routes/user-management.routes";
 import rolesPermissionsRoutes from "./routes/roles-permissions.routes";
+import workspaceRoutes from "./routes/workspace.routes";
 
 
 import { resolveTenant } from "./middleware/resolveTenant";
+import { resolveWorkspace, loadWorkspaceId } from "./middleware/resolveWorkspace";
 import { errorHandler } from "./middleware/error";
 
 
@@ -69,6 +71,7 @@ app.use("/api/pool", clientPoolRoutes);
 app.use("/api/priorities", clientPrioritiesRoutes);
 app.use("/api/user-management", userManagementRoutes);
 app.use("/api/roles-permissions", rolesPermissionsRoutes);
+app.use("/api/workspaces", workspaceRoutes);
 
 
 app.get("/api/health", (_req, res) => res.json({ ok: true, ts: new Date().toISOString() }));

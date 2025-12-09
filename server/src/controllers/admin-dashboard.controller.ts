@@ -1,4 +1,28 @@
 import { RequestHandler } from "express";
+import { WorkspaceService } from "../services/workspace.service";
+
+/**
+ * Helper para construir filtro de workspace para queries
+ */
+function getWorkspaceFilterSQL(
+  isConsolidated: boolean | undefined,
+  workspaceId: number | null | undefined,
+  accessibleIds: number[] | undefined,
+  tableAlias: string = ''
+): { sql: string; params: any[] } {
+  const prefix = tableAlias ? `${tableAlias}.` : '';
+
+  if (!isConsolidated && workspaceId) {
+    return { sql: `AND ${prefix}workspace_id = ?`, params: [workspaceId] };
+  }
+
+  if (isConsolidated && accessibleIds && accessibleIds.length > 0) {
+    const placeholders = accessibleIds.map(() => '?').join(',');
+    return { sql: `AND ${prefix}workspace_id IN (${placeholders})`, params: accessibleIds };
+  }
+
+  return { sql: '', params: [] };
+}
 
 /**
  * GET /api/admin/dashboard/summary
@@ -9,6 +33,22 @@ export const getDashboardSummary: RequestHandler = async (req: any, res: any) =>
   const currentYear = year ? parseInt(year) : new Date().getFullYear();
   const currentMonth = month ? parseInt(month) : new Date().getMonth() + 1;
 
+  // Obtener filtro de workspace
+  const isConsolidated = req.isConsolidatedView;
+  const workspaceId = req.workspaceId;
+  let accessibleIds: number[] = [];
+
+  if (isConsolidated) {
+    const workspaceService = new WorkspaceService(req.db);
+    accessibleIds = await workspaceService.getAccessibleWorkspaceIds(req.user.id);
+  }
+
+  const wsFilter = getWorkspaceFilterSQL(isConsolidated, workspaceId, accessibleIds, 'mi');
+  const wsFilterExpenses = getWorkspaceFilterSQL(isConsolidated, workspaceId, accessibleIds, '');
+  const wsFilterSOC = getWorkspaceFilterSQL(isConsolidated, workspaceId, accessibleIds, 'soc');
+  const wsFilterUsers = getWorkspaceFilterSQL(isConsolidated, workspaceId, accessibleIds, 'cp');
+  const wsFilterInfractions = getWorkspaceFilterSQL(isConsolidated, workspaceId, accessibleIds, '');
+
   try {
     // ========== ACTIVOS (INGRESOS REALES) ==========
 
@@ -18,8 +58,9 @@ export const getDashboardSummary: RequestHandler = async (req: any, res: any) =>
         COALESCE(SUM(mi.amount_paid), 0) as total_paid
        FROM monthly_invoices mi
        WHERE mi.invoice_year = ? AND mi.invoice_month = ?
-       AND mi.payment_status IN ('paid', 'partial')`,
-      [currentYear, currentMonth]
+       AND mi.payment_status IN ('paid', 'partial')
+       ${wsFilter.sql}`,
+      [currentYear, currentMonth, ...wsFilter.params]
     );
 
     // 2. Ingresos por costos operativos con ganancia (ej: libros, omisos)
@@ -27,8 +68,9 @@ export const getDashboardSummary: RequestHandler = async (req: any, res: any) =>
       `SELECT
         COALESCE(SUM(soc.profit_amount), 0) as total_profit
        FROM service_operational_costs soc
-       WHERE YEAR(soc.cost_date) = ? AND MONTH(soc.cost_date) = ?`,
-      [currentYear, currentMonth]
+       WHERE YEAR(soc.cost_date) = ? AND MONTH(soc.cost_date) = ?
+       ${wsFilterSOC.sql}`,
+      [currentYear, currentMonth, ...wsFilterSOC.params]
     );
 
     const totalActivos = Number(paidServices[0].total_paid || 0) + Number(operationalProfits[0].total_profit || 0);
@@ -42,8 +84,9 @@ export const getDashboardSummary: RequestHandler = async (req: any, res: any) =>
        FROM expenses
        WHERE expense_year = ? AND expense_month = ?
        AND expense_type = 'one_time'
-       AND is_active = TRUE`,
-      [currentYear, currentMonth]
+       AND is_active = TRUE
+       ${wsFilterExpenses.sql}`,
+      [currentYear, currentMonth, ...wsFilterExpenses.params]
     );
 
     // 2. Gastos recurrentes activos (se cuentan cada mes)
@@ -53,8 +96,9 @@ export const getDashboardSummary: RequestHandler = async (req: any, res: any) =>
        FROM expenses
        WHERE expense_type = 'monthly_recurring'
        AND is_active = TRUE
-       AND (expense_year < ? OR (expense_year = ? AND expense_month <= ?))`,
-      [currentYear, currentYear, currentMonth]
+       AND (expense_year < ? OR (expense_year = ? AND expense_month <= ?))
+       ${wsFilterExpenses.sql}`,
+      [currentYear, currentYear, currentMonth, ...wsFilterExpenses.params]
     );
 
     // 3. Costos operativos de servicios (gastos en omisos, libros, etc.)
@@ -62,8 +106,9 @@ export const getDashboardSummary: RequestHandler = async (req: any, res: any) =>
       `SELECT
         COALESCE(SUM(soc.cost_amount), 0) as total_costs
        FROM service_operational_costs soc
-       WHERE YEAR(soc.cost_date) = ? AND MONTH(soc.cost_date) = ?`,
-      [currentYear, currentMonth]
+       WHERE YEAR(soc.cost_date) = ? AND MONTH(soc.cost_date) = ?
+       ${wsFilterSOC.sql}`,
+      [currentYear, currentMonth, ...wsFilterSOC.params]
     );
 
     const totalPasivos = Number(oneTimeExpenses[0].total || 0) + Number(recurringExpenses[0].total || 0) + Number(operationalCosts[0].total_costs || 0);
@@ -76,7 +121,9 @@ export const getDashboardSummary: RequestHandler = async (req: any, res: any) =>
       `SELECT
         COALESCE(SUM(mi.balance), 0) as total_debt
        FROM monthly_invoices mi
-       WHERE mi.payment_status IN ('pending', 'partial', 'overdue', 'deferred_next_month')`
+       WHERE mi.payment_status IN ('pending', 'partial', 'overdue', 'deferred_next_month')
+       ${wsFilter.sql}`,
+      [...wsFilter.params]
     );
 
     // ========== CLIENTES AL DÍA ==========
@@ -85,8 +132,9 @@ export const getDashboardSummary: RequestHandler = async (req: any, res: any) =>
         COUNT(DISTINCT mi.client_user_id) as count
        FROM monthly_invoices mi
        WHERE mi.invoice_year = ? AND mi.invoice_month = ?
-       AND mi.payment_status = 'paid'`,
-      [currentYear, currentMonth]
+       AND mi.payment_status = 'paid'
+       ${wsFilter.sql}`,
+      [currentYear, currentMonth, ...wsFilter.params]
     );
 
     // ========== TOTAL CLIENTES ACTIVOS ==========
@@ -94,9 +142,12 @@ export const getDashboardSummary: RequestHandler = async (req: any, res: any) =>
       `SELECT
         COUNT(*) as count
        FROM users u
+       LEFT JOIN clients_profiles cp ON cp.user_id = u.id
        WHERE u.role = 'client'
        AND u.is_active = TRUE
-       AND u.services_disabled_by_infractions = FALSE`
+       AND u.services_disabled_by_infractions = FALSE
+       ${wsFilterUsers.sql}`,
+      [...wsFilterUsers.params]
     );
 
     // ========== INFRACCIONES ACTIVAS ==========
@@ -104,7 +155,9 @@ export const getDashboardSummary: RequestHandler = async (req: any, res: any) =>
       `SELECT
         COUNT(*) as count
        FROM client_infractions
-       WHERE is_active = TRUE`
+       WHERE is_active = TRUE
+       ${wsFilterInfractions.sql}`,
+      [...wsFilterInfractions.params]
     );
 
     // ========== INGRESOS POR MES (últimos 12 meses) ==========
@@ -115,10 +168,11 @@ export const getDashboardSummary: RequestHandler = async (req: any, res: any) =>
        FROM monthly_invoices mi
        WHERE mi.invoice_year >= ? - 1
        AND mi.payment_status IN ('paid', 'partial')
+       ${wsFilter.sql}
        GROUP BY mi.invoice_year, mi.invoice_month
        ORDER BY mi.invoice_year ASC, mi.invoice_month ASC
        LIMIT 12`,
-      [currentYear]
+      [currentYear, ...wsFilter.params]
     );
 
     // ========== RESUMEN POR CATEGORÍA DE GASTOS ==========
@@ -129,10 +183,11 @@ export const getDashboardSummary: RequestHandler = async (req: any, res: any) =>
        FROM expenses
        WHERE expense_year = ? AND expense_month = ?
        AND is_active = TRUE
+       ${wsFilterExpenses.sql}
        GROUP BY category
        ORDER BY total DESC
        LIMIT 5`,
-      [currentYear, currentMonth]
+      [currentYear, currentMonth, ...wsFilterExpenses.params]
     );
 
     // ========== RESPUESTA ==========
