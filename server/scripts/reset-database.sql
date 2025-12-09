@@ -20,6 +20,14 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- PASO 1: ELIMINAR TODAS LAS TABLAS EXISTENTES
 -- ============================================================================
 
+DROP TABLE IF EXISTS client_pool;
+DROP TABLE IF EXISTS client_service_priorities;
+DROP TABLE IF EXISTS service_operational_costs;
+DROP TABLE IF EXISTS client_bundles;
+DROP TABLE IF EXISTS bundle_services;
+DROP TABLE IF EXISTS service_bundles;
+DROP TABLE IF EXISTS expenses;
+DROP TABLE IF EXISTS client_infractions;
 DROP TABLE IF EXISTS task_observations;
 DROP TABLE IF EXISTS client_omisos;
 DROP TABLE IF EXISTS task_omisos;
@@ -57,6 +65,7 @@ CREATE TABLE IF NOT EXISTS users (
   deactivation_reason TEXT NULL,
   deactivated_at TIMESTAMP NULL,
   deactivated_by_user_id INT NULL,
+  services_disabled_by_infractions BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (assigned_to_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY (deactivated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
@@ -75,12 +84,15 @@ CREATE TABLE IF NOT EXISTS monthly_invoices (
   total_due DECIMAL(10,2) NOT NULL,
   amount_paid DECIMAL(10,2) DEFAULT 0.00,
   balance DECIMAL(10,2) NOT NULL,
-  payment_status ENUM('paid','pending','overdue','partial') DEFAULT 'pending',
+  payment_status ENUM('paid','partial','pending','overdue','deferred_next_month','unpaid_auto') DEFAULT 'pending',
   services_status VARCHAR(50),
   due_date DATE,
+  payment_registered_by_user_id INT NULL,
+  payment_registered_at TIMESTAMP NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   observations TEXT NULL,
   FOREIGN KEY (client_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (payment_registered_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   UNIQUE KEY unique_invoice_month (client_user_id, invoice_year, invoice_month)
 );
 
@@ -97,7 +109,12 @@ CREATE TABLE IF NOT EXISTS services (
   requires_file BOOLEAN DEFAULT TRUE,
   completion_determines_next BOOLEAN DEFAULT FALSE,
   is_active BOOLEAN DEFAULT TRUE,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  is_on_request BOOLEAN DEFAULT FALSE,
+  has_operational_cost BOOLEAN DEFAULT FALSE,
+  operational_cost_type ENUM('none', 'fixed', 'variable') DEFAULT 'none',
+  operational_cost_amount DECIMAL(10,2) NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_is_on_request (is_on_request)
 );
 
 -- client_services
@@ -173,7 +190,12 @@ CREATE TABLE IF NOT EXISTS clients_profiles (
   sat_password_encrypted VARCHAR(255),
   overall_rating DECIMAL(3,2) DEFAULT 5.00,
   notes TEXT,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  sede VARCHAR(100) NULL,
+  grupo VARCHAR(50) NULL,
+  active_infractions_count INT DEFAULT 0,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_sede (sede),
+  INDEX idx_grupo (grupo)
 );
 
 -- monthly_service_checklist
@@ -245,12 +267,260 @@ CREATE TABLE IF NOT EXISTS task_observations (
   INDEX idx_primary (client_user_id, is_primary)
 );
 
--- Agregar campo ratings_count a clients_profiles
+-- Agregar campo ratings_count y contador de infracciones a clients_profiles
 ALTER TABLE clients_profiles
-ADD COLUMN IF NOT EXISTS ratings_count INT DEFAULT 0;
+ADD COLUMN IF NOT EXISTS ratings_count INT DEFAULT 0,
+ADD COLUMN IF NOT EXISTS active_infractions_count INT DEFAULT 0;
 
 -- ============================================================================
--- PASO 4: CARGAR DATOS DE SEED
+-- PASO 4: CREAR TABLAS DEL SISTEMA CONTABLE (Migración 008)
+-- ============================================================================
+
+-- Sistema de Infracciones
+CREATE TABLE IF NOT EXISTS client_infractions (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  client_user_id INT NOT NULL,
+  infraction_type ENUM('automatic_unpaid', 'manual') NOT NULL,
+  reason TEXT NOT NULL,
+  related_invoice_id INT NULL,
+  created_by_user_id INT NULL,
+  is_active BOOLEAN DEFAULT TRUE,
+  resolved_by_user_id INT NULL,
+  resolved_at TIMESTAMP NULL,
+  resolution_notes TEXT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (client_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (related_invoice_id) REFERENCES monthly_invoices(id) ON DELETE SET NULL,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (resolved_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  INDEX idx_client_active (client_user_id, is_active),
+  INDEX idx_type (infraction_type)
+);
+
+-- Sistema de Gastos
+CREATE TABLE IF NOT EXISTS expenses (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  expense_type ENUM('one_time', 'monthly_recurring') NOT NULL,
+  description TEXT NOT NULL,
+  amount DECIMAL(10,2) NOT NULL,
+  expense_date DATE NOT NULL,
+  expense_month INT NOT NULL,
+  expense_year INT NOT NULL,
+  category VARCHAR(100) NULL,
+  created_by_user_id INT NOT NULL,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_date (expense_date),
+  INDEX idx_month_year (expense_year, expense_month),
+  INDEX idx_type (expense_type),
+  INDEX idx_active (is_active)
+);
+
+-- Sistema de Paquetes/Bundles de Servicios
+CREATE TABLE IF NOT EXISTS service_bundles (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  bundle_name VARCHAR(255) NOT NULL,
+  description TEXT NULL,
+  bundle_price DECIMAL(10,2) NOT NULL,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_active (is_active)
+);
+
+CREATE TABLE IF NOT EXISTS bundle_services (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  bundle_id INT NOT NULL,
+  service_id INT NOT NULL,
+  FOREIGN KEY (bundle_id) REFERENCES service_bundles(id) ON DELETE CASCADE,
+  FOREIGN KEY (service_id) REFERENCES services(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_bundle_service (bundle_id, service_id),
+  INDEX idx_bundle (bundle_id),
+  INDEX idx_service (service_id)
+);
+
+CREATE TABLE IF NOT EXISTS client_bundles (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  client_user_id INT NOT NULL,
+  bundle_id INT NOT NULL,
+  custom_price DECIMAL(10,2) NULL,
+  start_date DATE NULL,
+  status VARCHAR(50) DEFAULT 'active',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (client_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (bundle_id) REFERENCES service_bundles(id) ON DELETE CASCADE,
+  INDEX idx_client (client_user_id),
+  INDEX idx_bundle (bundle_id),
+  INDEX idx_status (status)
+);
+
+-- Sistema de Costos Operativos de Servicios
+CREATE TABLE IF NOT EXISTS service_operational_costs (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  service_id INT NOT NULL,
+  invoice_id INT NULL,
+  client_user_id INT NOT NULL,
+  cost_amount DECIMAL(10,2) NOT NULL,
+  revenue_amount DECIMAL(10,2) NOT NULL,
+  profit_amount DECIMAL(10,2) GENERATED ALWAYS AS (revenue_amount - cost_amount) STORED,
+  description TEXT NULL,
+  cost_date DATE NOT NULL,
+  created_by_user_id INT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (service_id) REFERENCES services(id) ON DELETE CASCADE,
+  FOREIGN KEY (invoice_id) REFERENCES monthly_invoices(id) ON DELETE SET NULL,
+  FOREIGN KEY (client_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_service (service_id),
+  INDEX idx_invoice (invoice_id),
+  INDEX idx_client (client_user_id),
+  INDEX idx_date (cost_date)
+);
+
+-- client_service_priorities
+CREATE TABLE IF NOT EXISTS client_service_priorities (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  client_user_id INT NOT NULL,
+  service_id INT NULL,
+  priority ENUM('baja', 'normal', 'alta', 'urgente') DEFAULT 'normal',
+  notes TEXT NULL,
+  created_by_user_id INT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (client_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (service_id) REFERENCES services(id) ON DELETE CASCADE,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  UNIQUE KEY unique_client_service_priority (client_user_id, service_id)
+);
+
+-- client_pool
+CREATE TABLE IF NOT EXISTS client_pool (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  client_user_id INT NOT NULL,
+  invoice_id INT NULL,
+  task_id INT NULL,
+  service_id INT NULL,
+  description TEXT NOT NULL,
+  priority ENUM('baja', 'normal', 'alta', 'urgente') DEFAULT 'normal',
+  status ENUM('pending', 'in_progress', 'completed', 'cancelled') DEFAULT 'pending',
+  added_by_user_id INT NULL,
+  assigned_to_user_id INT NULL,
+  completed_by_user_id INT NULL,
+  added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  started_at TIMESTAMP NULL,
+  completed_at TIMESTAMP NULL,
+  notes TEXT NULL,
+  FOREIGN KEY (client_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (invoice_id) REFERENCES monthly_invoices(id) ON DELETE CASCADE,
+  FOREIGN KEY (task_id) REFERENCES monthly_service_checklist(id) ON DELETE CASCADE,
+  FOREIGN KEY (service_id) REFERENCES services(id) ON DELETE SET NULL,
+  FOREIGN KEY (added_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (assigned_to_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (completed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  INDEX idx_status (status),
+  INDEX idx_priority (priority),
+  INDEX idx_client (client_user_id),
+  INDEX idx_assigned_to (assigned_to_user_id)
+);
+
+-- ============================================================================
+-- PASO 5: CREAR TRIGGERS PARA INFRACCIONES
+-- ============================================================================
+
+-- Nota: Los triggers se ejecutan sin DELIMITER cuando se usa desde Node.js
+
+-- Trigger para incrementar contador al crear infracción activa
+DROP TRIGGER IF EXISTS after_insert_infraction;
+CREATE TRIGGER after_insert_infraction
+AFTER INSERT ON client_infractions
+FOR EACH ROW
+BEGIN
+  IF NEW.is_active = TRUE THEN
+    UPDATE clients_profiles
+    SET active_infractions_count = active_infractions_count + 1
+    WHERE user_id = NEW.client_user_id;
+
+    UPDATE users
+    SET services_disabled_by_infractions = TRUE
+    WHERE id = NEW.client_user_id
+      AND (SELECT active_infractions_count FROM clients_profiles WHERE user_id = NEW.client_user_id) >= 3;
+  END IF;
+END;
+
+-- Trigger para actualizar contador al resolver/activar infracción
+DROP TRIGGER IF EXISTS after_update_infraction;
+CREATE TRIGGER after_update_infraction
+AFTER UPDATE ON client_infractions
+FOR EACH ROW
+BEGIN
+  IF OLD.is_active = TRUE AND NEW.is_active = FALSE THEN
+    UPDATE clients_profiles
+    SET active_infractions_count = GREATEST(0, active_infractions_count - 1)
+    WHERE user_id = NEW.client_user_id;
+  END IF;
+
+  IF OLD.is_active = FALSE AND NEW.is_active = TRUE THEN
+    UPDATE clients_profiles
+    SET active_infractions_count = active_infractions_count + 1
+    WHERE user_id = NEW.client_user_id;
+  END IF;
+
+  UPDATE users u
+  JOIN clients_profiles cp ON u.id = cp.user_id
+  SET u.services_disabled_by_infractions = (cp.active_infractions_count >= 3)
+  WHERE u.id = NEW.client_user_id;
+END;
+
+-- Trigger para decrementar contador al eliminar infracción activa
+DROP TRIGGER IF EXISTS after_delete_infraction;
+CREATE TRIGGER after_delete_infraction
+AFTER DELETE ON client_infractions
+FOR EACH ROW
+BEGIN
+  IF OLD.is_active = TRUE THEN
+    UPDATE clients_profiles
+    SET active_infractions_count = GREATEST(0, active_infractions_count - 1)
+    WHERE user_id = OLD.client_user_id;
+
+    UPDATE users u
+    JOIN clients_profiles cp ON u.id = cp.user_id
+    SET u.services_disabled_by_infractions = (cp.active_infractions_count >= 3)
+    WHERE u.id = OLD.client_user_id;
+  END IF;
+END;
+
+-- Trigger para observaciones primordiales (ya existente, mantener)
+DROP TRIGGER IF EXISTS before_insert_task_observation;
+CREATE TRIGGER before_insert_task_observation
+BEFORE INSERT ON task_observations
+FOR EACH ROW
+BEGIN
+  IF NEW.is_primary = TRUE THEN
+    UPDATE task_observations
+    SET is_primary = FALSE
+    WHERE client_user_id = NEW.client_user_id
+      AND is_primary = TRUE;
+  END IF;
+END;
+
+DROP TRIGGER IF EXISTS before_update_task_observation;
+CREATE TRIGGER before_update_task_observation
+BEFORE UPDATE ON task_observations
+FOR EACH ROW
+BEGIN
+  IF NEW.is_primary = TRUE AND OLD.is_primary = FALSE THEN
+    UPDATE task_observations
+    SET is_primary = FALSE
+    WHERE client_user_id = NEW.client_user_id
+      AND is_primary = TRUE
+      AND id != NEW.id;
+  END IF;
+END;
+
+-- ============================================================================
+-- PASO 6: CARGAR DATOS DE SEED
 -- ============================================================================
 
 -- Insertar usuarios de ejemplo

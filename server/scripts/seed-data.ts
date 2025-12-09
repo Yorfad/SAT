@@ -201,6 +201,7 @@ async function seedData() {
       client3Id, service2Id,
       client3Id, service3Id
     ]);
+    
 
     console.log('✅ Servicios de clientes creados');
 

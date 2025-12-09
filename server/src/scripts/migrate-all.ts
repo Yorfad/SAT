@@ -13,7 +13,7 @@ typeof env.tenants === "string" ? JSON.parse(env.tenants) : env.tenants;
 const migDir = path.resolve(__dirname, "../migrations");
 const files = fs.readdirSync(migDir).filter(f => f.endsWith(".sql")).sort();
 for (const [slug, cfg] of Object.entries(TENANTS)) {
-const conn = await mysql.createConnection({ host: env.dbHost, user: env.dbUser, password: env.dbPassword, database: cfg.database, multipleStatements: true });
+const conn = await mysql.createConnection({ host: env.dbHost, port: env.dbPort, user: env.dbUser, password: env.dbPassword, database: cfg.database, multipleStatements: true });
 for (const f of files) {
 const sql = fs.readFileSync(path.join(migDir, f), "utf8");
 console.log(`[migrate ${slug}]`, f);

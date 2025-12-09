@@ -14,7 +14,8 @@ const payload = jwt.verify(token, env.jwtSecret) as any;
 if (!req.tenantSlug || payload.tenant !== req.tenantSlug) {
 return res.status(403).json({ message: "Token/tenant no coincide" });
 }
-(req as any).user = payload; // { sub, role, name, tenant }
+// Map 'sub' to 'id' for easier access in controllers
+(req as any).user = { ...payload, id: payload.sub };
 next();
 } catch {
 res.status(401).json({ message: "Token inválido/expirado" });

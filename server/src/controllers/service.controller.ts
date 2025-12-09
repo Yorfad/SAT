@@ -18,6 +18,7 @@ export async function listServices(_req: Request, res: Response) {
         activation_window_days,
         requires_file,
         completion_determines_next,
+        is_on_request,
         is_active,
         created_at
       FROM services
@@ -50,6 +51,7 @@ export async function getService(req: Request, res: Response) {
         activation_window_days,
         requires_file,
         completion_determines_next,
+        is_on_request,
         is_active,
         created_at
       FROM services
@@ -83,11 +85,12 @@ export async function createService(req: Request, res: Response) {
       activation_window_days = 7,
       requires_file = true,
       completion_determines_next = false,
+      is_on_request = false,
       is_active = true
     } = req.body;
 
     // Validaciones
-    if (!service_name || !default_price) {
+    if (!service_name || default_price === undefined || default_price === null) {
       return res.status(400).json({ message: 'service_name y default_price son requeridos' });
     }
 
@@ -114,8 +117,9 @@ export async function createService(req: Request, res: Response) {
         activation_window_days,
         requires_file,
         completion_determines_next,
+        is_on_request,
         is_active
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         service_name,
         description,
@@ -126,6 +130,7 @@ export async function createService(req: Request, res: Response) {
         activation_window_days,
         requires_file,
         completion_determines_next,
+        is_on_request,
         is_active
       ]
     );
@@ -154,6 +159,7 @@ export async function updateService(req: Request, res: Response) {
       activation_window_days,
       requires_file,
       completion_determines_next,
+      is_on_request,
       is_active
     } = req.body;
 
@@ -187,6 +193,7 @@ export async function updateService(req: Request, res: Response) {
         activation_window_days = ?,
         requires_file = ?,
         completion_determines_next = ?,
+        is_on_request = ?,
         is_active = ?
       WHERE id = ?`,
       [
@@ -199,6 +206,7 @@ export async function updateService(req: Request, res: Response) {
         activation_window_days,
         requires_file,
         completion_determines_next,
+        is_on_request,
         is_active,
         id
       ]

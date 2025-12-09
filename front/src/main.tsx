@@ -16,6 +16,8 @@ import ClientDetail from './pages/admin/ClientDetail';
 import ServicesPage from './pages/admin/ServicesPage';
 import ClientDashboard from './pages/client/ClientDashboard';
 import InvoicesPage from './pages/common/InvoicesPage';
+import AdminDashboard from './pages/admin/AdminDashboard';
+import FinancialManagementPage from './pages/admin/FinancialManagementPage';
 
 import { AuthProvider, useAuth } from './context/AuthContext';
 import './index.css';
@@ -42,6 +44,22 @@ const router = createBrowserRouter([
       { index: true, element: <IndexRedirect /> },
 
       // Empleado/Admin
+      {
+        path: 'admin/dashboard',
+        element: (
+          <Protected roles={['admin','employee']}>
+            <AdminDashboard />
+          </Protected>
+        ),
+      },
+      {
+        path: 'admin/financial',
+        element: (
+          <Protected roles={['admin','employee']}>
+            <FinancialManagementPage />
+          </Protected>
+        ),
+      },
       {
         path: 'admin/my-clients',
         element: (

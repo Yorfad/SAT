@@ -14,6 +14,17 @@ import invoicesRoutes from "./routes/invoices.routes";
 import boardRoutes from "./routes/board.routes";
 import myClientsRoutes from "./routes/my-clients.routes";
 import observationsRoutes from "./routes/observations.routes";
+import paymentsRoutes from "./routes/payments.routes";
+import infractionsRoutes from "./routes/infractions.routes";
+import expensesRoutes from "./routes/expenses.routes";
+import bundlesRoutes from "./routes/bundles.routes";
+import operationalCostsRoutes from "./routes/operational-costs.routes";
+import adminRoutes from "./routes/admin.routes";
+import clientManagementRoutes from "./routes/client-management.routes";
+import clientPoolRoutes from "./routes/client-pool.routes";
+import clientPrioritiesRoutes from "./routes/client-priorities.routes";
+import userManagementRoutes from "./routes/user-management.routes";
+import rolesPermissionsRoutes from "./routes/roles-permissions.routes";
 
 
 import { resolveTenant } from "./middleware/resolveTenant";
@@ -47,6 +58,17 @@ app.use("/api/invoices", invoicesRoutes);
 app.use("/api/board", boardRoutes);
 app.use("/api/my-clients", myClientsRoutes);
 app.use("/api/observations", observationsRoutes);
+app.use("/api/payments", paymentsRoutes);
+app.use("/api/infractions", infractionsRoutes);
+app.use("/api/expenses", expensesRoutes);
+app.use("/api/bundles", bundlesRoutes);
+app.use("/api/operational-costs", operationalCostsRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api/client-management", clientManagementRoutes);
+app.use("/api/pool", clientPoolRoutes);
+app.use("/api/priorities", clientPrioritiesRoutes);
+app.use("/api/user-management", userManagementRoutes);
+app.use("/api/roles-permissions", rolesPermissionsRoutes);
 
 
 app.get("/api/health", (_req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
