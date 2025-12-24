@@ -1,112 +1,58 @@
 import { Router } from 'express';
 import * as controller from '../controllers/user-management.controller';
-import { requirePermission } from '../middleware/permissions';
 import { authenticateToken } from '../middleware/auth';
+import { loadWorkspaceId } from '../middleware/resolveWorkspace';
 
 const router = Router();
 
 // Todas las rutas requieren autenticación
 router.use(authenticateToken);
+router.use(loadWorkspaceId);
 
-  // ========================================
-  // DASHBOARD DE ESTADÍSTICAS
-  // ========================================
+// Middleware para verificar que es admin
+const requireAdmin = (req: any, res: any, next: any) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Se requieren permisos de administrador' });
+  }
+  next();
+};
 
-  /**
-   * Obtiene las estadísticas del dashboard
-   * GET /api/user-management/dashboard
-   * Requiere: users:view o admin
-   */
-  router.get(
-    '/dashboard',
-    requirePermission('users:view', { auditAction: 'users:dashboard_view' }),
-    controller.getDashboardStats
-  );
+// Aplicar requireAdmin a todas las rutas
+router.use(requireAdmin);
 
-  // ========================================
-  // GESTIÓN DE USUARIOS
-  // ========================================
+// ========================================
+// GESTIÓN DE USUARIOS
+// ========================================
 
-  /**
-   * Lista todos los usuarios
-   * GET /api/user-management/users
-   * Requiere: users:list
-   */
-  router.get(
-    '/users',
-    requirePermission('users:list', { auditAction: 'users:list' }),
-    controller.listUsers
-  );
+// Listar usuarios (admins y empleados)
+router.get('/users', controller.listUsers);
 
-  /**
-   * Obtiene los detalles de un usuario
-   * GET /api/user-management/users/:id
-   * Requiere: users:view
-   */
-  router.get(
-    '/users/:id',
-    requirePermission('users:view', {
-      auditAction: 'users:view',
-      resourceType: 'user',
-      getResourceId: (req) => parseInt(req.params.id),
-    }),
-    controller.getUserDetails
-  );
+// Obtener detalles de un usuario
+router.get('/users/:id', controller.getUserDetails);
 
-  /**
-   * Crea un nuevo usuario
-   * POST /api/user-management/users
-   * Requiere: users:create
-   */
-  router.post(
-    '/users',
-    requirePermission('users:create', { auditAction: 'users:create' }),
-    controller.createUser
-  );
+// Crear nuevo usuario
+router.post('/users', controller.createUser);
 
-  /**
-   * Actualiza un usuario existente
-   * PUT /api/user-management/users/:id
-   * Requiere: users:edit
-   */
-  router.put(
-    '/users/:id',
-    requirePermission('users:edit', {
-      auditAction: 'users:edit',
-      resourceType: 'user',
-      getResourceId: (req) => parseInt(req.params.id),
-    }),
-    controller.updateUser
-  );
+// Actualizar usuario
+router.put('/users/:id', controller.updateUser);
 
-  /**
-   * Activa o desactiva un usuario
-   * PATCH /api/user-management/users/:id/status
-   * Requiere: users:deactivate
-   */
-  router.patch(
-    '/users/:id/status',
-    requirePermission('users:deactivate', {
-      auditAction: 'users:toggle_status',
-      resourceType: 'user',
-      getResourceId: (req) => parseInt(req.params.id),
-    }),
-    controller.toggleUserStatus
-  );
+// Cambiar contraseña
+router.patch('/users/:id/password', controller.changePassword);
 
-  /**
-   * Obtiene las estadísticas de un usuario
-   * GET /api/user-management/users/:id/stats
-   * Requiere: users:view
-   */
-  router.get(
-    '/users/:id/stats',
-    requirePermission('users:view', {
-      auditAction: 'users:view_stats',
-      resourceType: 'user',
-      getResourceId: (req) => parseInt(req.params.id),
-    }),
-    controller.getUserStats
-  );
+// Activar/desactivar usuario
+router.patch('/users/:id/status', controller.toggleUserStatus);
+
+// Actualizar roles de un usuario
+router.put('/users/:id/roles', controller.updateUserRoles);
+
+// Actualizar workspaces de un usuario
+router.put('/users/:id/workspaces', controller.updateUserWorkspaces);
+
+// ========================================
+// ROLES
+// ========================================
+
+// Listar roles disponibles
+router.get('/roles', controller.listRoles);
 
 export default router;

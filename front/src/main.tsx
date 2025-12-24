@@ -25,6 +25,7 @@ import FinancialManagementPage from './pages/admin/FinancialManagementPage';
 import WorkspacesPage from './pages/admin/WorkspacesPage';
 import InvitationsPage from './pages/admin/InvitationsPage';
 import ClientFieldsPage from './pages/admin/ClientFieldsPage';
+import UsersPage from './pages/admin/UsersPage';
 
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { WorkspaceProvider } from './context/WorkspaceContext';
@@ -154,6 +155,14 @@ const router = createBrowserRouter([
         element: (
           <Protected roles={['admin']}>
             <ClientFieldsPage />
+          </Protected>
+        ),
+      },
+      {
+        path: 'admin/users',
+        element: (
+          <Protected roles={['admin']}>
+            <UsersPage />
           </Protected>
         ),
       },
