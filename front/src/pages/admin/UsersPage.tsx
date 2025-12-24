@@ -90,6 +90,22 @@ export default function UsersPage() {
     }
   });
 
+  // Eliminar usuario
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      return api.delete(`/user-management/users/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+    }
+  });
+
+  const handleDelete = (user: User) => {
+    if (confirm(`¿Estás seguro de eliminar a ${user.full_name}? Esta acción no se puede deshacer.`)) {
+      deleteMutation.mutate(user.id);
+    }
+  };
+
   const openNewModal = () => {
     setEditingUser(null);
     setForm({ email: '', password: '', full_name: '', role: 'employee' });
@@ -260,6 +276,13 @@ export default function UsersPage() {
                       className="text-sm text-orange-400 hover:text-orange-300"
                     >
                       Contraseña
+                    </button>
+                    <button
+                      onClick={() => handleDelete(user)}
+                      disabled={deleteMutation.isPending}
+                      className="text-sm text-red-400 hover:text-red-300 disabled:opacity-50"
+                    >
+                      Eliminar
                     </button>
                   </div>
                 </td>

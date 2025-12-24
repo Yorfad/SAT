@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import * as controller from '../controllers/user-management.controller';
 import { authenticateToken } from '../middleware/auth';
-import { loadWorkspaceId } from '../middleware/resolveWorkspace';
+import { resolveWorkspace, loadWorkspaceId } from '../middleware/resolveWorkspace';
 
 const router = Router();
 
 // Todas las rutas requieren autenticación
 router.use(authenticateToken);
+router.use(resolveWorkspace);
 router.use(loadWorkspaceId);
 
 // Middleware para verificar que es admin
@@ -41,6 +42,9 @@ router.patch('/users/:id/password', controller.changePassword);
 
 // Activar/desactivar usuario
 router.patch('/users/:id/status', controller.toggleUserStatus);
+
+// Eliminar usuario
+router.delete('/users/:id', controller.deleteUser);
 
 // Actualizar roles de un usuario
 router.put('/users/:id/roles', controller.updateUserRoles);

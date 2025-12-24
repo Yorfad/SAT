@@ -323,6 +323,55 @@ export const toggleUserStatus: RequestHandler = async (req: any, res) => {
 };
 
 /**
+ * Eliminar usuario
+ * DELETE /api/user-management/users/:id
+ */
+export const deleteUser: RequestHandler = async (req: any, res) => {
+  try {
+    const { id } = req.params;
+    const currentUserId = req.user.sub;
+
+    // No permitir eliminarse a sí mismo
+    if (parseInt(id) === currentUserId) {
+      return res.status(400).json({ message: 'No puedes eliminarte a ti mismo' });
+    }
+
+    // Verificar que existe
+    const [existing]: any = await req.db.query(
+      'SELECT id, role FROM users WHERE id = ?',
+      [id]
+    );
+
+    if (!existing.length) {
+      return res.status(404).json({ message: 'Usuario no encontrado' });
+    }
+
+    // No permitir eliminar al último admin
+    if (existing[0].role === 'admin') {
+      const [admins]: any = await req.db.query(
+        "SELECT COUNT(*) as count FROM users WHERE role = 'admin' AND id != ?",
+        [id]
+      );
+      if (admins[0].count === 0) {
+        return res.status(400).json({ message: 'No puedes eliminar al único administrador' });
+      }
+    }
+
+    // Eliminar relaciones primero
+    await req.db.query('DELETE FROM user_workspaces WHERE user_id = ?', [id]);
+    await req.db.query('DELETE FROM user_roles WHERE user_id = ?', [id]);
+
+    // Eliminar usuario
+    await req.db.query('DELETE FROM users WHERE id = ?', [id]);
+
+    res.json({ message: 'Usuario eliminado' });
+  } catch (error) {
+    console.error('Error deleting user:', error);
+    res.status(500).json({ message: 'Error al eliminar usuario' });
+  }
+};
+
+/**
  * Asignar/quitar roles a un usuario
  * PUT /api/user-management/users/:id/roles
  */
