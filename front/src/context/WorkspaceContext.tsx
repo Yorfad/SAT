@@ -100,6 +100,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     queryClient.invalidateQueries({ queryKey: ['admin-summary'] });
     queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     queryClient.invalidateQueries({ queryKey: ['board'] });
+    queryClient.invalidateQueries({ queryKey: ['users'] });
   }, [queryClient]);
 
   const handleSetConsolidatedView = useCallback((consolidated: boolean) => {

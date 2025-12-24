@@ -22,6 +22,7 @@ export const listUsers: RequestHandler = async (req: any, res) => {
         0 as clients_count
       FROM users u
       WHERE u.role IN ('admin', 'employee')
+        AND u.role != 'superadmin'
     `;
     const params: any[] = [];
 

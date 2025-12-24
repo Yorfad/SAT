@@ -10,9 +10,9 @@ router.use(authenticateToken);
 router.use(resolveWorkspace);
 router.use(loadWorkspaceId);
 
-// Middleware para verificar que es admin
+// Middleware para verificar que es admin o superadmin
 const requireAdmin = (req: any, res: any, next: any) => {
-  if (req.user.role !== 'admin') {
+  if (req.user.role !== 'admin' && req.user.role !== 'superadmin') {
     return res.status(403).json({ message: 'Se requieren permisos de administrador' });
   }
   next();
