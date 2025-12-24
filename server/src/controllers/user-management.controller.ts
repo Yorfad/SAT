@@ -1,7 +1,5 @@
 import { RequestHandler } from 'express';
-import { RowDataPacket } from 'mysql2/promise';
-import bcrypt from 'bcrypt';
-import { UserStats } from '../models/user-stats.model';
+import bcrypt from 'bcryptjs';
 
 /**
  * Obtiene la lista de todos los usuarios con sus roles y estadísticas
@@ -68,7 +66,7 @@ export const listUsers: RequestHandler = async (req: any, res: any) => {
 
     queryParams.push(parseInt(limit as string), parseInt(offset as string));
 
-    const [users] = await req.db.execute<UserStats[]>(query, queryParams);
+    const [users]: any = await req.db.execute(query, queryParams);
 
     // Obtener el total de usuarios
     const countQuery = `
@@ -77,7 +75,7 @@ export const listUsers: RequestHandler = async (req: any, res: any) => {
       ${whereClause}
     `;
 
-    const [countResult] = await req.db.execute<RowDataPacket[]>(
+    const [countResult]: any = await req.db.execute(
       countQuery,
       queryParams.slice(0, -2) // Excluir limit y offset
     );
@@ -124,7 +122,7 @@ export const getUserDetails: RequestHandler = async (req: any, res: any) => {
       WHERE u.id = ? AND u.tenant_id = ?
     `;
 
-    const [users] = await req.db.execute<RowDataPacket[]>(query, [userId, req.user.tenant]);
+    const [users]: any = await req.db.execute(query, [userId, req.user.tenant]);
 
     if (users.length === 0) {
       return res.status(404).json({ message: 'Usuario no encontrado' });
@@ -152,7 +150,7 @@ export const getUserDetails: RequestHandler = async (req: any, res: any) => {
       ORDER BY ur.granted_at DESC
     `;
 
-    const [roles] = await req.db.execute<RowDataPacket[]>(rolesQuery, [userId]);
+    const [roles]: any = await req.db.execute(rolesQuery, [userId]);
 
     // Obtener permisos directos
     const permissionsQuery = `
@@ -176,7 +174,7 @@ export const getUserDetails: RequestHandler = async (req: any, res: any) => {
       ORDER BY up.granted_at DESC
     `;
 
-    const [permissions] = await req.db.execute<RowDataPacket[]>(permissionsQuery, [userId]);
+    const [permissions]: any = await req.db.execute(permissionsQuery, [userId]);
 
     // Obtener estadísticas
     const statsQuery = `
@@ -189,7 +187,7 @@ export const getUserDetails: RequestHandler = async (req: any, res: any) => {
       WHERE user_id = ?
     `;
 
-    const [stats] = await req.db.execute<RowDataPacket[]>(statsQuery, [userId]);
+    const [stats]: any = await req.db.execute(statsQuery, [userId]);
 
     res.json({
       user,
@@ -230,7 +228,7 @@ export const createUser: RequestHandler = async (req: any, res: any) => {
 
     // Verificar que el email no exista
     const checkEmailQuery = 'SELECT id FROM users WHERE email = ? AND tenant_id = ?';
-    const [existingUsers] = await req.db.execute<RowDataPacket[]>(checkEmailQuery, [
+    const [existingUsers]: any = await req.db.execute(checkEmailQuery, [
       email,
       req.user.tenant,
     ]);
@@ -248,7 +246,7 @@ export const createUser: RequestHandler = async (req: any, res: any) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
-    const [result] = await req.db.execute<any>(insertQuery, [
+    const [result]: any = await req.db.execute(insertQuery, [
       req.user.tenant,
       email,
       hashedPassword,
@@ -278,7 +276,7 @@ export const createUser: RequestHandler = async (req: any, res: any) => {
         WHERE tenant_id = ? AND role_key = ? AND is_active = TRUE
         LIMIT 1
       `;
-      const [defaultRoles] = await req.db.execute<RowDataPacket[]>(defaultRoleQuery, [
+      const [defaultRoles]: any = await req.db.execute(defaultRoleQuery, [
         req.user.tenant,
         role,
       ]);
@@ -313,7 +311,7 @@ export const updateUser: RequestHandler = async (req: any, res: any) => {
 
     // Verificar que el usuario existe
     const checkQuery = 'SELECT id FROM users WHERE id = ? AND tenant_id = ?';
-    const [existingUsers] = await req.db.execute<RowDataPacket[]>(checkQuery, [
+    const [existingUsers]: any = await req.db.execute(checkQuery, [
       userId,
       req.user.tenant,
     ]);
@@ -325,7 +323,7 @@ export const updateUser: RequestHandler = async (req: any, res: any) => {
     // Si se cambia el email, verificar que no exista
     if (email) {
       const checkEmailQuery = 'SELECT id FROM users WHERE email = ? AND tenant_id = ? AND id != ?';
-      const [duplicateUsers] = await req.db.execute<RowDataPacket[]>(checkEmailQuery, [
+      const [duplicateUsers]: any = await req.db.execute(checkEmailQuery, [
         email,
         req.user.tenant,
         userId,
@@ -410,7 +408,7 @@ export const toggleUserStatus: RequestHandler = async (req: any, res: any) => {
       WHERE id = ? AND tenant_id = ?
     `;
 
-    const [result] = await req.db.execute<any>(query, [is_active, userId, req.user.tenant]);
+    const [result]: any = await req.db.execute(query, [is_active, userId, req.user.tenant]);
 
     if (result.affectedRows === 0) {
       return res.status(404).json({ message: 'Usuario no encontrado' });
@@ -457,11 +455,11 @@ export const getUserStats: RequestHandler = async (req: any, res: any) => {
       ORDER BY uas.stat_date DESC
     `;
 
-    const [stats] = await req.db.execute<RowDataPacket[]>(query, [userId]);
+    const [stats]: any = await req.db.execute(query, [userId]);
 
     // Calcular totales
     const totals = stats.reduce(
-      (acc, stat) => ({
+      (acc: any, stat: any) => ({
         tasks_completed: acc.tasks_completed + (stat.tasks_completed || 0),
         clients_managed: acc.clients_managed + (stat.clients_managed || 0),
         services_completed: acc.services_completed + (stat.services_completed || 0),
@@ -502,7 +500,7 @@ export const getDashboardStats: RequestHandler = async (req: any, res: any) => {
       WHERE tenant_id = ?
     `;
 
-    const [usersStats] = await req.db.execute<RowDataPacket[]>(usersStatsQuery, [req.user.tenant]);
+    const [usersStats]: any = await req.db.execute(usersStatsQuery, [req.user.tenant]);
 
     // Estadísticas de tareas
     const tasksStatsQuery = `
@@ -517,7 +515,7 @@ export const getDashboardStats: RequestHandler = async (req: any, res: any) => {
       WHERE u.tenant_id = ?
     `;
 
-    const [tasksStats] = await req.db.execute<RowDataPacket[]>(tasksStatsQuery, [req.user.tenant]);
+    const [tasksStats]: any = await req.db.execute(tasksStatsQuery, [req.user.tenant]);
 
     // Estadísticas de clientes
     const clientsStatsQuery = `
@@ -533,7 +531,7 @@ export const getDashboardStats: RequestHandler = async (req: any, res: any) => {
       WHERE u.tenant_id = ? AND u.is_active = TRUE
     `;
 
-    const [clientsStats] = await req.db.execute<RowDataPacket[]>(clientsStatsQuery, [req.user.tenant]);
+    const [clientsStats]: any = await req.db.execute(clientsStatsQuery, [req.user.tenant]);
 
     // Actividad reciente (últimos 7 días)
     const recentActivityQuery = `
@@ -550,7 +548,7 @@ export const getDashboardStats: RequestHandler = async (req: any, res: any) => {
       ORDER BY stat_date DESC
     `;
 
-    const [recentActivity] = await req.db.execute<RowDataPacket[]>(recentActivityQuery, [req.user.tenant]);
+    const [recentActivity]: any = await req.db.execute(recentActivityQuery, [req.user.tenant]);
 
     // Top usuarios por tareas completadas
     const topUsersQuery = `
@@ -569,7 +567,7 @@ export const getDashboardStats: RequestHandler = async (req: any, res: any) => {
       LIMIT 10
     `;
 
-    const [topUsers] = await req.db.execute<RowDataPacket[]>(topUsersQuery, [req.user.tenant]);
+    const [topUsers]: any = await req.db.execute(topUsersQuery, [req.user.tenant]);
 
     res.json({
       users: usersStats[0],

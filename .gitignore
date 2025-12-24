@@ -49,3 +49,6 @@ RediculousCoding/
 
 # Claude settings
 .claude/settings.local.json
+
+# Backups de base de datos
+backups/*.sql

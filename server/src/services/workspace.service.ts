@@ -70,19 +70,43 @@ export class WorkspaceService {
   }
 
   /**
+   * Generar código de registro único de 4 dígitos
+   */
+  async generateUniqueCode(): Promise<string> {
+    let code: string;
+    let attempts = 0;
+
+    do {
+      code = String(Math.floor(1000 + Math.random() * 9000));
+      const [existing] = await this.db.execute<RowDataPacket[]>(
+        'SELECT id FROM workspaces WHERE registration_code = ?',
+        [code]
+      );
+      if (existing.length === 0) break;
+      attempts++;
+    } while (attempts < 100);
+
+    return code;
+  }
+
+  /**
    * Crear un nuevo workspace
    */
   async createWorkspace(data: CreateWorkspaceDTO, createdBy: number): Promise<number> {
+    // Generar código de registro único
+    const registrationCode = await this.generateUniqueCode();
+
     const [result] = await this.db.execute<ResultSetHeader>(`
-      INSERT INTO workspaces (name, slug, description, color, icon, created_by_user_id)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO workspaces (name, slug, description, color, icon, created_by_user_id, registration_code, auto_approve_registration)
+      VALUES (?, ?, ?, ?, ?, ?, ?, TRUE)
     `, [
       data.name,
       data.slug.toLowerCase(),
       data.description || null,
       data.color || '#3b82f6',
       data.icon || 'building',
-      createdBy
+      createdBy,
+      registrationCode
     ]);
 
     const workspaceId = result.insertId;

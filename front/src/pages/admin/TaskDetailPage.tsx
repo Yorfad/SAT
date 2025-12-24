@@ -57,9 +57,32 @@ export default function TaskDetailPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['my-tasks'] })
       queryClient.invalidateQueries({ queryKey: ['myClients'] })
       queryClient.invalidateQueries({ queryKey: ['client-observations'] })
       navigate('/admin/tasks')
+    }
+  })
+
+  // Actualizar tarea completada
+  const updateTask = useMutation({
+    mutationFn: async (data: { file?: File; nextPaymentDate?: string; observation_text?: string; rating?: number | null; is_primary?: boolean }) => {
+      const formData = new FormData()
+      if (data.file) formData.append('file', data.file)
+      if (data.nextPaymentDate) formData.append('nextPaymentDate', data.nextPaymentDate)
+      if (data.observation_text !== undefined) formData.append('observation_text', data.observation_text)
+      if (data.rating !== null && data.rating !== undefined) formData.append('rating', data.rating.toString())
+      if (data.is_primary) formData.append('is_primary', 'true')
+
+      return api.put(`/services/checklist/${taskId}/update`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['task', taskId] })
+      queryClient.invalidateQueries({ queryKey: ['my-tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['client-observations'] })
+      alert('Tarea actualizada exitosamente')
     }
   })
 
@@ -456,10 +479,180 @@ export default function TaskDetailPage() {
         </div>
       )}
 
-      {/* Información adicional para tareas completadas */}
-      {task.status === 'completed' && (
+      {/* Formulario de edición para tareas completadas editables */}
+      {task.status === 'completed' && task.is_editable && (
         <div className="bg-slate-700 border border-slate-600 rounded-lg shadow-lg p-6">
-          <h2 className="text-lg font-semibold mb-4 text-slate-100">Información de la Tarea</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-slate-100">Editar Tarea Completada</h2>
+            <span className="px-3 py-1 rounded text-xs font-medium bg-orange-900/30 text-orange-400 border border-orange-800">
+              Editable
+            </span>
+          </div>
+
+          <p className="text-sm text-slate-400 mb-4">
+            Puedes modificar el archivo y las observaciones hasta que se genere la próxima tarea de este servicio.
+          </p>
+
+          <form onSubmit={async (e) => {
+            e.preventDefault()
+            setLoadingUpload(true)
+            try {
+              await updateTask.mutateAsync({
+                file: file || undefined,
+                nextPaymentDate: isLibros && nextPaymentDate ? nextPaymentDate : undefined,
+                observation_text: observationText,
+                rating: rating !== null ? rating : undefined,
+                is_primary: isPrimary
+              })
+            } catch (error: any) {
+              alert(error?.response?.data?.message || 'Error al actualizar tarea')
+            } finally {
+              setLoadingUpload(false)
+            }
+          }} className="space-y-4">
+
+            {/* Campo para cambiar archivo */}
+            <div>
+              <label className="block text-sm font-medium mb-2 text-slate-200">
+                Cambiar archivo {task.file_path && '(opcional - ya hay un archivo subido)'}
+              </label>
+              <input
+                type="file"
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+                accept={isDeclaracion ? 'image/*' : '.pdf,.jpg,.jpeg,.png'}
+                className="w-full bg-slate-600 border border-slate-500 text-slate-200 rounded p-2 file:mr-4 file:py-1 file:px-3 file:rounded file:border-0 file:bg-orange-600 file:text-white file:cursor-pointer hover:file:bg-orange-700 focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none"
+              />
+              <p className="text-xs text-slate-400 mt-1">
+                Sube un nuevo archivo para reemplazar el existente
+              </p>
+            </div>
+
+            {/* Campo para fecha de libros (si aplica) */}
+            {isLibros && (
+              <div>
+                <label className="block text-sm font-medium mb-2 text-slate-200">
+                  Próxima fecha de pago de libros
+                </label>
+                <input
+                  type="date"
+                  value={nextPaymentDate}
+                  onChange={(e) => setNextPaymentDate(e.target.value)}
+                  className="w-full bg-slate-600 border border-slate-500 text-slate-200 rounded p-2 focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none"
+                  min={new Date().toISOString().split('T')[0]}
+                />
+              </div>
+            )}
+
+            {/* Observaciones */}
+            <div className="border-t border-slate-600 pt-4">
+              <h3 className="text-sm font-semibold mb-3 text-slate-200">Agregar/Modificar Observaciones</h3>
+
+              <div className="mb-4">
+                <label className="block text-sm font-medium mb-2 text-slate-200">
+                  Calificación del servicio (1-5 estrellas)
+                </label>
+                <div className="flex gap-2 items-center">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      type="button"
+                      onClick={() => setRating(star === rating ? null : star)}
+                      className={`text-3xl transition-colors ${
+                        rating !== null && star <= rating
+                          ? 'text-yellow-400'
+                          : 'text-slate-500 hover:text-yellow-300'
+                      }`}
+                    >
+                      ★
+                    </button>
+                  ))}
+                  {rating !== null && (
+                    <span className="ml-2 text-sm text-slate-300">
+                      {rating}/5
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="mb-4">
+                <label className="block text-sm font-medium mb-2 text-slate-200">
+                  Comentarios sobre el servicio
+                </label>
+                <textarea
+                  value={observationText}
+                  onChange={(e) => setObservationText(e.target.value)}
+                  className="w-full bg-slate-600 border border-slate-500 text-slate-200 placeholder-slate-400 rounded p-2 focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none"
+                  rows={3}
+                  placeholder="Ej: El cliente fue muy amable y proporcionó todos los documentos a tiempo..."
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="isPrimaryEdit"
+                  checked={isPrimary}
+                  onChange={(e) => setIsPrimary(e.target.checked)}
+                  className="w-4 h-4 text-yellow-600 bg-slate-600 border-slate-500 rounded focus:ring-yellow-500"
+                />
+                <label htmlFor="isPrimaryEdit" className="text-sm text-slate-200 cursor-pointer">
+                  Marcar como observación importante
+                </label>
+              </div>
+            </div>
+
+            <div className="flex gap-4 pt-4">
+              <button
+                type="submit"
+                disabled={loadingUpload || updateTask.isPending}
+                className="px-6 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 disabled:opacity-50 font-medium transition-colors"
+              >
+                {loadingUpload ? 'Guardando...' : 'Guardar Cambios'}
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/admin/tasks')}
+                className="px-6 py-2 bg-slate-600 text-slate-200 rounded hover:bg-slate-500 font-medium transition-colors"
+              >
+                Volver
+              </button>
+            </div>
+          </form>
+
+          {/* Info de la tarea */}
+          <div className="mt-6 pt-6 border-t border-slate-600">
+            <p className="text-sm text-slate-300">
+              <strong className="text-slate-200">Mes/Año:</strong> {task.invoice_month}/{task.invoice_year}
+            </p>
+            <p className="text-sm text-slate-300 mt-2">
+              <strong className="text-slate-200">Estado:</strong>{' '}
+              <span className="px-2 py-1 rounded text-xs font-medium bg-green-900/30 text-green-400 border border-green-800">
+                Completada
+              </span>
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Información para tareas completadas NO editables */}
+      {task.status === 'completed' && !task.is_editable && (
+        <div className="bg-slate-700 border border-slate-600 rounded-lg shadow-lg p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-slate-100">Información de la Tarea</h2>
+            <span className="px-3 py-1 rounded text-xs font-medium bg-slate-600 text-slate-400 border border-slate-500">
+              Bloqueada
+            </span>
+          </div>
+
+          <div className="bg-slate-800 border border-slate-600 rounded-lg p-4 mb-4">
+            <p className="text-sm text-slate-400">
+              <svg className="w-5 h-5 inline mr-2 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+              Esta tarea ya no es editable porque se ha generado una nueva tarea para este servicio.
+            </p>
+          </div>
+
           <p className="text-sm text-slate-300">
             <strong className="text-slate-200">Mes/Año:</strong> {task.invoice_month}/{task.invoice_year}
           </p>

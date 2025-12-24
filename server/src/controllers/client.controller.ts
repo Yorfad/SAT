@@ -125,17 +125,43 @@ export async function getClientDashboard(req: Request, res: Response) {
   const clientId = user.sub ?? user.id; // por si tu JWT usa sub o id
 
   if (!clientId) return res.status(400).json({ message: "No user id in token" });
-  
+
+  // Facturas del cliente (últimas 12)
   const [invoices] = await req.db!.query(
-    `SELECT id, invoice_year, invoice_month, total_due, amount_paid, balance, payment_status 
+    `SELECT id, invoice_year, invoice_month, total_due, amount_paid, balance, payment_status
      FROM monthly_invoices
      WHERE client_user_id=?
      ORDER BY invoice_year DESC, invoice_month DESC
-     LIMIT 5`,
+     LIMIT 12`,
     [clientId]
   );
 
-  res.json({ invoices });
+  // Servicios activos del cliente
+  const [services] = await req.db!.query(
+    `SELECT cs.id, s.service_name, s.description,
+            COALESCE(cs.custom_price, s.default_price) AS custom_price,
+            s.default_price, cs.status, cs.start_date
+     FROM client_services cs
+     JOIN services s ON s.id = cs.service_id
+     WHERE cs.client_user_id = ? AND cs.status = 'active'
+     ORDER BY s.service_name`,
+    [clientId]
+  );
+
+  // Información del perfil
+  const [profile] = await req.db!.query(
+    `SELECT cp.overall_rating, u.full_name, u.nit, u.email, u.phone_number
+     FROM users u
+     LEFT JOIN clients_profiles cp ON cp.user_id = u.id
+     WHERE u.id = ?`,
+    [clientId]
+  );
+
+  res.json({
+    invoices,
+    services,
+    profile: (profile as any[])[0] || null
+  });
 }
 
 /**
@@ -321,5 +347,223 @@ export async function activateClientService(req: Request, res: Response) {
   } catch (error: any) {
     console.error('Error activating client service:', error);
     res.status(500).json({ message: 'Error al activar servicio', error: error.message });
+  }
+}
+
+// ===============================
+// ENDPOINTS PARA CLIENTE MÓVIL
+// ===============================
+
+/**
+ * GET /clients/my-tasks
+ * Obtiene las tareas del cliente autenticado para la app móvil
+ */
+export async function getClientTasks(req: Request, res: Response) {
+  try {
+    const clientId = (req as any).user?.sub || (req as any).user?.id;
+
+    if (!clientId) {
+      return res.status(400).json({ message: "No user id in token" });
+    }
+
+    // Obtener tareas del cliente a través de la relación con monthly_invoices
+    const [tasks]: any = await req.db!.query(
+      `SELECT
+        msc.id,
+        msc.task_name,
+        msc.status,
+        msc.file_path,
+        msc.client_approved,
+        msc.client_approved_at,
+        msc.client_rejection_reason,
+        msc.files_uploaded_at,
+        msc.auto_approve_days,
+        msc.auto_approved,
+        mi.invoice_month,
+        mi.invoice_year,
+        s.service_name
+      FROM monthly_service_checklist msc
+      JOIN monthly_invoices mi ON mi.id = msc.invoice_id
+      LEFT JOIN services s ON s.id = msc.service_id
+      WHERE mi.client_user_id = ?
+      ORDER BY mi.invoice_year DESC, mi.invoice_month DESC, msc.id DESC`,
+      [clientId]
+    );
+
+    res.json({ tasks });
+  } catch (error: any) {
+    console.error('Error getting client tasks:', error);
+    res.status(500).json({ message: 'Error al obtener tareas', error: error.message });
+  }
+}
+
+/**
+ * POST /clients/tasks/:id/approve
+ * Aprueba una tarea completada
+ */
+export async function approveTask(req: Request, res: Response) {
+  try {
+    const { id: taskId } = req.params;
+    const clientId = (req as any).user?.sub || (req as any).user?.id;
+
+    // Verificar que la tarea existe y pertenece al cliente (a través de invoice)
+    const [[task]]: any = await req.db!.query(
+      `SELECT msc.id, mi.client_user_id, msc.status, msc.client_approved
+       FROM monthly_service_checklist msc
+       JOIN monthly_invoices mi ON mi.id = msc.invoice_id
+       WHERE msc.id = ?`,
+      [taskId]
+    );
+
+    if (!task) {
+      return res.status(404).json({ message: 'Tarea no encontrada' });
+    }
+
+    if (task.client_user_id !== clientId) {
+      return res.status(403).json({ message: 'No autorizado para aprobar esta tarea' });
+    }
+
+    if (task.status !== 'completed') {
+      return res.status(400).json({ message: 'Solo se pueden aprobar tareas completadas' });
+    }
+
+    if (task.client_approved !== null) {
+      return res.status(400).json({ message: 'Esta tarea ya fue revisada' });
+    }
+
+    // Aprobar la tarea
+    await req.db!.query(
+      `UPDATE monthly_service_checklist
+       SET client_approved = TRUE,
+           client_approved_at = NOW(),
+           auto_approved = FALSE
+       WHERE id = ?`,
+      [taskId]
+    );
+
+    res.json({ ok: true, message: 'Tarea aprobada exitosamente' });
+  } catch (error: any) {
+    console.error('Error approving task:', error);
+    res.status(500).json({ message: 'Error al aprobar tarea', error: error.message });
+  }
+}
+
+/**
+ * POST /clients/tasks/:id/reject
+ * Rechaza una tarea con motivo
+ */
+export async function rejectTask(req: Request, res: Response) {
+  try {
+    const { id: taskId } = req.params;
+    const { reason } = req.body;
+    const clientId = (req as any).user?.sub || (req as any).user?.id;
+
+    if (!reason || reason.trim().length === 0) {
+      return res.status(400).json({ message: 'El motivo del rechazo es requerido' });
+    }
+
+    // Verificar que la tarea existe y pertenece al cliente (a través de invoice)
+    const [[task]]: any = await req.db!.query(
+      `SELECT msc.id, mi.client_user_id, msc.status, msc.client_approved
+       FROM monthly_service_checklist msc
+       JOIN monthly_invoices mi ON mi.id = msc.invoice_id
+       WHERE msc.id = ?`,
+      [taskId]
+    );
+
+    if (!task) {
+      return res.status(404).json({ message: 'Tarea no encontrada' });
+    }
+
+    if (task.client_user_id !== clientId) {
+      return res.status(403).json({ message: 'No autorizado para rechazar esta tarea' });
+    }
+
+    if (task.status !== 'completed') {
+      return res.status(400).json({ message: 'Solo se pueden rechazar tareas completadas' });
+    }
+
+    if (task.client_approved !== null) {
+      return res.status(400).json({ message: 'Esta tarea ya fue revisada' });
+    }
+
+    // Rechazar la tarea
+    await req.db!.query(
+      `UPDATE monthly_service_checklist
+       SET client_approved = FALSE,
+           client_approved_at = NOW(),
+           client_rejection_reason = ?,
+           status = 'pending'
+       WHERE id = ?`,
+      [reason, taskId]
+    );
+
+    res.json({ ok: true, message: 'Problema reportado exitosamente' });
+  } catch (error: any) {
+    console.error('Error rejecting task:', error);
+    res.status(500).json({ message: 'Error al reportar problema', error: error.message });
+  }
+}
+
+/**
+ * POST /clients/request-service
+ * Solicita un nuevo servicio
+ */
+export async function requestService(req: Request, res: Response) {
+  try {
+    const { service_id, description } = req.body;
+    const clientId = (req as any).user?.sub || (req as any).user?.id;
+
+    if (!service_id && (!description || description.trim().length === 0)) {
+      return res.status(400).json({ message: 'Debe seleccionar un servicio o proporcionar una descripción' });
+    }
+
+    // Insertar la solicitud
+    const [result]: any = await req.db!.query(
+      `INSERT INTO service_requests (client_user_id, service_id, request_description, status, created_at)
+       VALUES (?, ?, ?, 'pending', NOW())`,
+      [clientId, service_id || null, description || null]
+    );
+
+    res.status(201).json({
+      ok: true,
+      id: result.insertId,
+      message: 'Solicitud enviada exitosamente'
+    });
+  } catch (error: any) {
+    console.error('Error requesting service:', error);
+    res.status(500).json({ message: 'Error al enviar solicitud', error: error.message });
+  }
+}
+
+/**
+ * GET /clients/available-services
+ * Lista los servicios disponibles que el cliente puede solicitar
+ */
+export async function getAvailableServices(req: Request, res: Response) {
+  try {
+    const clientId = (req as any).user?.sub || (req as any).user?.id;
+
+    // Obtener servicios disponibles que:
+    // 1. Están activos
+    // 2. Son de tipo 'on_request' o 'selected_clients'
+    // 3. El cliente NO tiene asignados actualmente
+    const [services]: any = await req.db!.query(
+      `SELECT s.id, s.service_name, s.description, s.default_price
+       FROM services s
+       WHERE s.is_active = 1
+         AND s.assignment_type IN ('on_request', 'selected_clients')
+         AND s.id NOT IN (
+           SELECT cs.service_id FROM client_services cs
+           WHERE cs.client_user_id = ? AND cs.status = 'active'
+         )
+       ORDER BY s.service_name`,
+      [clientId]
+    );
+
+    res.json({ services });
+  } catch (error: any) {
+    console.error('Error getting available services:', error);
+    res.status(500).json({ message: 'Error al obtener servicios', error: error.message });
   }
 }

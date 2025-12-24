@@ -237,25 +237,27 @@ export const getFinancialProjections: RequestHandler = async (req: any, res: any
   try {
     // ========== INGRESOS PROYECTADOS ==========
 
-    // 1. Ingresos de servicios individuales activos (sin bundle)
+    // 1. Ingresos de servicios individuales activos
     const [individualServices]: any = await req.db.query(
       `SELECT
-        COALESCE(SUM(cs.price), 0) as total_income
+        COALESCE(SUM(COALESCE(cs.custom_price, s.default_price)), 0) as total_income
        FROM client_services cs
+       INNER JOIN services s ON s.id = cs.service_id
        INNER JOIN users u ON u.id = cs.client_user_id
-       WHERE cs.is_active = TRUE
-       AND cs.bundle_id IS NULL
+       WHERE cs.status = 'active'
        AND u.is_active = TRUE
        AND u.services_disabled_by_infractions = FALSE`
     );
 
-    // 2. Ingresos de bundles activos
+    // 2. Ingresos de bundles activos (clientes con bundles asignados)
     const [bundleIncome]: any = await req.db.query(
       `SELECT
-        COALESCE(SUM(sb.total_price), 0) as total_income
-       FROM service_bundles sb
-       INNER JOIN users u ON u.id = sb.client_user_id
-       WHERE sb.is_active = TRUE
+        COALESCE(SUM(COALESCE(cb.custom_price, sb.bundle_price)), 0) as total_income
+       FROM client_bundles cb
+       INNER JOIN service_bundles sb ON sb.id = cb.bundle_id
+       INNER JOIN users u ON u.id = cb.client_user_id
+       WHERE cb.status = 'active'
+       AND sb.is_active = TRUE
        AND u.is_active = TRUE
        AND u.services_disabled_by_infractions = FALSE`
     );
@@ -264,13 +266,15 @@ export const getFinancialProjections: RequestHandler = async (req: any, res: any
 
     // ========== GASTOS PROYECTADOS ==========
 
-    // 1. Gastos operativos de bundles
+    // 1. Gastos operativos de servicios con costos operativos
     const [bundleOperationalCosts]: any = await req.db.query(
       `SELECT
-        COALESCE(SUM(sb.operational_cost), 0) as total_costs
-       FROM service_bundles sb
-       INNER JOIN users u ON u.id = sb.client_user_id
-       WHERE sb.is_active = TRUE
+        COALESCE(SUM(s.operational_cost_amount), 0) as total_costs
+       FROM client_services cs
+       INNER JOIN services s ON s.id = cs.service_id
+       INNER JOIN users u ON u.id = cs.client_user_id
+       WHERE cs.status = 'active'
+       AND s.has_operational_cost = TRUE
        AND u.is_active = TRUE
        AND u.services_disabled_by_infractions = FALSE`
     );
@@ -311,13 +315,16 @@ export const getFinancialProjections: RequestHandler = async (req: any, res: any
         u.id,
         u.full_name,
         COUNT(DISTINCT cs.id) as services_count,
-        COUNT(DISTINCT sb.id) as bundles_count,
-        COALESCE(SUM(CASE WHEN cs.bundle_id IS NULL THEN cs.price ELSE 0 END), 0) as individual_services_income,
-        COALESCE(SUM(DISTINCT sb.total_price), 0) as bundle_income,
-        COALESCE(SUM(DISTINCT sb.operational_cost), 0) as bundle_costs
+        COUNT(DISTINCT cb.id) as bundles_count,
+        COALESCE(SUM(COALESCE(cs.custom_price, s.default_price)), 0) as individual_services_income,
+        COALESCE(SUM(DISTINCT COALESCE(cb.custom_price, sb.bundle_price)), 0) as bundle_income,
+        COALESCE(SUM(DISTINCT s2.operational_cost_amount), 0) as operational_costs
        FROM users u
-       LEFT JOIN client_services cs ON cs.client_user_id = u.id AND cs.is_active = TRUE
-       LEFT JOIN service_bundles sb ON sb.client_user_id = u.id AND sb.is_active = TRUE
+       LEFT JOIN client_services cs ON cs.client_user_id = u.id AND cs.status = 'active'
+       LEFT JOIN services s ON s.id = cs.service_id
+       LEFT JOIN client_bundles cb ON cb.client_user_id = u.id AND cb.status = 'active'
+       LEFT JOIN service_bundles sb ON sb.id = cb.bundle_id AND sb.is_active = TRUE
+       LEFT JOIN services s2 ON s2.id = cs.service_id AND s2.has_operational_cost = TRUE
        WHERE u.role = 'client'
        AND u.is_active = TRUE
        AND u.services_disabled_by_infractions = FALSE
@@ -341,7 +348,7 @@ export const getFinancialProjections: RequestHandler = async (req: any, res: any
           bundles: Number(bundleIncome[0].total_income || 0)
         },
         gastos: {
-          costosOperacionalesBundles: Number(bundleOperationalCosts[0].total_costs || 0),
+          costosOperacionales: Number(bundleOperationalCosts[0].total_costs || 0),
           gastosRecurrentes: Number(recurringExpenses[0].total || 0),
           gastosUnicos: Number(oneTimeExpenses[0].total || 0)
         }

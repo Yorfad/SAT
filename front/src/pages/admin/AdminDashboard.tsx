@@ -59,7 +59,6 @@ export default function AdminDashboard(){
   });
 
   const monthNames = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
-  const currentMonthName = data?.period.month ? monthNames[data.period.month - 1] : "";
 
   // Generar años disponibles (últimos 5 años hacia atrás y 1 hacia adelante)
   const availableYears = [];
@@ -292,7 +291,8 @@ export default function AdminDashboard(){
                     outerRadius={80}
                     fill="#8884d8"
                     dataKey="value"
-                    label={({ name, value }) => {
+                    label={(props: any) => {
+                      const { name, value } = props;
                       if (value > 0) {
                         return `${name}: ${money(value)}`;
                       }
@@ -336,7 +336,8 @@ export default function AdminDashboard(){
                     outerRadius={80}
                     fill="#8884d8"
                     dataKey="value"
-                    label={({ name, value }) => {
+                    label={(props: any) => {
+                      const { name, value } = props;
                       if (value > 0) {
                         return `${name}: ${money(value)}`;
                       }

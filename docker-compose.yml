@@ -1,0 +1,119 @@
+# ============================================
+# Docker Compose para SAT
+# ============================================
+# Uso:
+#   Desarrollo: docker-compose up -d
+#   Producción: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# ============================================
+
+services:
+  # ==========================================
+  # Base de Datos MariaDB
+  # ==========================================
+  mysql:
+    image: mariadb:10.11
+    container_name: sat_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-admin123}
+      MYSQL_DATABASE: ${DB_DATABASE:-sat_acme}
+      MYSQL_USER: ${DB_USER:-satuser}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-satpass123}
+    ports:
+      - "${DB_PORT:-3310}:3306"
+    volumes:
+      # Datos persistentes
+      - mysql_data:/var/lib/mysql
+      # Scripts de inicialización (se ejecutan solo la primera vez)
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASSWORD:-admin123}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - sat_network
+
+  # ==========================================
+  # Backend (Node.js + Express)
+  # ==========================================
+  backend:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: sat_backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3000
+      # Base de datos
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: ${DB_USER:-root}
+      DB_PASSWORD: ${DB_ROOT_PASSWORD:-admin123}
+      DB_DATABASE: ${DB_DATABASE:-sat_acme}
+      # Tenants
+      TENANTS: ${TENANTS:-{"acme":{"database":"sat_acme"}}}
+      # JWT
+      JWT_SECRET: ${JWT_SECRET:-cambiame_en_produccion_123456789}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      # CORS
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173,http://localhost:80}
+      # Encriptación
+      SAT_ENC_KEY: ${SAT_ENC_KEY:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
+      # Uploads
+      UPLOAD_DIR: /app/uploads
+    ports:
+      - "${BACKEND_PORT:-3000}:3000"
+    volumes:
+      # Archivos subidos (persistente)
+      - uploads_data:/app/uploads
+      # En desarrollo, montar código fuente para hot-reload
+      # - ./server/src:/app/src:ro
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - sat_network
+
+  # ==========================================
+  # Frontend (React + Nginx)
+  # ==========================================
+  frontend:
+    build:
+      context: ./front
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:3000/api}
+    container_name: sat_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    networks:
+      - sat_network
+
+# ==========================================
+# Volúmenes persistentes
+# ==========================================
+volumes:
+  mysql_data:
+    name: sat_mysql_data
+  uploads_data:
+    name: sat_uploads_data
+
+# ==========================================
+# Red interna
+# ==========================================
+networks:
+  sat_network:
+    name: sat_network
+    driver: bridge

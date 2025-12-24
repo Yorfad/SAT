@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useBrigade, useToggleChecklist, useUpdateObservations } from "../../hooks/useBrigade";
 import UploadArtifact from "../../ui/UploadArtifact"; // ya lo tienes
 import { detectTenant } from "../../lib/tenant";
@@ -43,7 +43,7 @@ export default function BoardPage(){
           </thead>
 
           <tbody>
-            {rows.map((r, idx) => {
+            {rows.map((r, _idx) => {
               const inv = r.invoice;
               const passShown = !!reveal[r.client_id];
               const allOk = r.checklist_progress.ok;

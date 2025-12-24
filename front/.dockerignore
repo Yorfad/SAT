@@ -1,0 +1,22 @@
+# Dependencias
+node_modules
+npm-debug.log
+
+# Build
+dist
+
+# Archivos de desarrollo
+.env
+.env.local
+*.log
+
+# IDE
+.vscode
+.idea
+
+# Git
+.git
+.gitignore
+
+# Tests
+coverage

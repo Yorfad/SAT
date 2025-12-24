@@ -1,46 +1,58 @@
 import { Router } from "express";
 import { authenticateToken } from "../middleware/auth";
 import { requireRoles } from "../middleware/rbac";
+import { resolveWorkspace, loadWorkspaceId } from "../middleware/resolveWorkspace";
 import { validate } from "../middleware/validate";
 import { z } from "zod";
 import {
-  getClientBundles,
-  getBundleServices,
+  listBundles,
+  getBundleById,
   createBundle,
   updateBundle,
   deleteBundle,
+  getBundleServices,
   addServiceToBundle,
-  removeServiceFromBundle
+  updateBundleService,
+  removeServiceFromBundle,
+  getClientBundles,
+  assignBundleToClient,
+  updateClientBundle,
+  unassignBundleFromClient,
+  calculateBundlePrice
 } from "../controllers/bundles.controller";
 
 const router = Router();
 router.use(authenticateToken);
+router.use(resolveWorkspace);
+router.use(loadWorkspaceId);
 
-// Obtener bundles de un cliente
+// ================== PLANTILLAS DE BUNDLES ==================
+
+// Listar todos los bundles
 router.get(
-  "/clients/:clientId/bundles",
+  "/",
   requireRoles("admin", "employee"),
-  getClientBundles
+  listBundles
 );
 
-// Obtener servicios de un bundle
+// Obtener un bundle específico
 router.get(
-  "/:bundleId/services",
+  "/:id",
   requireRoles("admin", "employee"),
-  getBundleServices
+  getBundleById
 );
 
-// Crear nuevo bundle para un cliente
+// Crear nuevo bundle
 router.post(
-  "/clients/:clientId/bundles",
+  "/",
   requireRoles("admin"),
   validate(z.object({
     body: z.object({
-      name: z.string().min(1),
+      bundleName: z.string().min(1, "El nombre es requerido"),
       description: z.string().optional(),
-      totalPrice: z.number().positive(),
-      operationalCost: z.number().min(0).optional(),
-      serviceIds: z.array(z.number().int().positive()).optional()
+      bundlePrice: z.number().min(0).optional(),
+      serviceIds: z.array(z.number().int().positive()).optional(),
+      isGlobal: z.boolean().optional()
     })
   })),
   createBundle
@@ -48,15 +60,15 @@ router.post(
 
 // Actualizar bundle
 router.patch(
-  "/:bundleId",
+  "/:id",
   requireRoles("admin"),
   validate(z.object({
     body: z.object({
-      name: z.string().optional(),
+      bundleName: z.string().optional(),
       description: z.string().optional(),
-      totalPrice: z.number().positive().optional(),
-      operationalCost: z.number().min(0).optional(),
-      isActive: z.boolean().optional()
+      bundlePrice: z.number().min(0).optional(),
+      isActive: z.boolean().optional(),
+      serviceIds: z.array(z.number().int().positive()).optional()
     })
   })),
   updateBundle
@@ -64,14 +76,23 @@ router.patch(
 
 // Eliminar bundle
 router.delete(
-  "/:bundleId",
+  "/:id",
   requireRoles("admin"),
   deleteBundle
 );
 
+// ================== SERVICIOS EN BUNDLES ==================
+
+// Obtener servicios de un bundle
+router.get(
+  "/:id/services",
+  requireRoles("admin", "employee"),
+  getBundleServices
+);
+
 // Agregar servicio a bundle
 router.post(
-  "/:bundleId/add-service",
+  "/:id/services",
   requireRoles("admin"),
   validate(z.object({
     body: z.object({
@@ -81,16 +102,76 @@ router.post(
   addServiceToBundle
 );
 
-// Quitar servicio de bundle
-router.post(
-  "/:bundleId/remove-service",
+// Actualizar configuración de servicio en bundle
+router.patch(
+  "/:id/services/:serviceId",
   requireRoles("admin"),
   validate(z.object({
     body: z.object({
-      serviceId: z.number().int().positive()
+      includeInBasePrice: z.boolean().optional(),
+      addWhenDue: z.boolean().optional(),
+      customPrice: z.number().min(0).optional(),
+      assignmentType: z.enum(["all_clients", "selected_clients"]).optional()
     })
   })),
+  updateBundleService
+);
+
+// Quitar servicio de bundle
+router.delete(
+  "/:id/services/:serviceId",
+  requireRoles("admin"),
   removeServiceFromBundle
+);
+
+// Calcular precio del bundle para un mes
+router.get(
+  "/calculate-price/:bundleId",
+  requireRoles("admin", "employee"),
+  calculateBundlePrice
+);
+
+// ================== BUNDLES DE CLIENTES ==================
+
+// Obtener bundles de un cliente
+router.get(
+  "/clients/:clientId",
+  requireRoles("admin", "employee"),
+  getClientBundles
+);
+
+// Asignar bundle a un cliente
+router.post(
+  "/clients/:clientId/assign",
+  requireRoles("admin"),
+  validate(z.object({
+    body: z.object({
+      bundleId: z.number().int().positive(),
+      customPrice: z.number().min(0).optional(),
+      startDate: z.string().optional()
+    })
+  })),
+  assignBundleToClient
+);
+
+// Actualizar asignación de bundle
+router.patch(
+  "/client-bundles/:id",
+  requireRoles("admin"),
+  validate(z.object({
+    body: z.object({
+      customPrice: z.number().min(0).optional(),
+      status: z.enum(["active", "paused", "cancelled"]).optional()
+    })
+  })),
+  updateClientBundle
+);
+
+// Desasignar bundle de cliente
+router.delete(
+  "/client-bundles/:id",
+  requireRoles("admin"),
+  unassignBundleFromClient
 );
 
 export default router;

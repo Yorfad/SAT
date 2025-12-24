@@ -29,3 +29,16 @@ export function getPoolForTenantSlug(slug: string) {
   }
   return pools[cfg.database];
 }
+
+/**
+ * Retorna todos los tenants configurados con sus pools de conexión
+ * Usado para búsqueda de clientes en login móvil sin especificar tenant
+ */
+export function getAllTenantPools(): Array<{ slug: string; pool: mysql.Pool }> {
+  return Object.entries(env.tenants).map(([slug, cfg]) => {
+    if (!pools[cfg.database]) {
+      pools[cfg.database] = makePool(cfg.database);
+    }
+    return { slug, pool: pools[cfg.database] };
+  });
+}

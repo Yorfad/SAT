@@ -1,0 +1,20 @@
+{
+  "name": "sat-project",
+  "version": "1.0.0",
+  "description": "Sistema de Administración Tributaria",
+  "scripts": {
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:build": "docker-compose up --build -d",
+    "docker:logs": "docker-compose logs -f",
+    "docker:logs:backend": "docker-compose logs -f backend",
+    "docker:logs:frontend": "docker-compose logs -f frontend",
+    "docker:logs:mysql": "docker-compose logs -f mysql",
+    "db:backup": "node scripts/db-backup.js",
+    "db:restore": "node scripts/db-restore.js",
+    "db:migrate-to-docker": "node scripts/db-migrate-to-docker.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

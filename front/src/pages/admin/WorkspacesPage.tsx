@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../../lib/api';
-import { useWorkspace, Workspace } from '../../context/WorkspaceContext';
+import { useWorkspace } from '../../context/WorkspaceContext';
+import type { Workspace } from '../../types/workspace.types';
 
 interface WorkspaceWithStats extends Workspace {
   stats?: {

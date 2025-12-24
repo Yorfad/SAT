@@ -3,6 +3,18 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../../lib/api";
 import { Link } from "react-router-dom";
 
+interface ClientField {
+  id: number;
+  field_key: string;
+  field_label: string;
+  field_type: 'text' | 'number' | 'email' | 'phone' | 'date' | 'select' | 'textarea' | 'checkbox';
+  placeholder: string | null;
+  is_required: boolean;
+  show_in_registration: boolean;
+  show_in_list: boolean;
+  select_options: string[] | null;
+}
+
 type Client = {
   id: number;
   full_name: string;
@@ -81,9 +93,14 @@ export default function ClientsPage() {
   // Para edición de perfil
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [profileForm, setProfileForm] = useState({
+    fullName: "",
+    email: "",
+    nit: "",
+    phoneNumber: "",
     sede: "",
     grupo: "",
-    contractNumber: ""
+    contractNumber: "",
+    isActive: true
   });
 
   // Para pool tasks
@@ -92,6 +109,24 @@ export default function ClientsPage() {
     clientUserId: "",
     description: "",
     priority: "normal" as "baja" | "normal" | "alta" | "urgente"
+  });
+
+  // Para crear nuevo cliente
+  const [showCreateClientModal, setShowCreateClientModal] = useState(false);
+  const [createClientForm, setCreateClientForm] = useState<{
+    fullName: string;
+    email: string;
+    password: string;
+    nit: string;
+    phoneNumber: string;
+    customFields: Record<string, string>;
+  }>({
+    fullName: "",
+    email: "",
+    password: "",
+    nit: "",
+    phoneNumber: "",
+    customFields: {}
   });
 
   // Expandir/colapsar grupos
@@ -128,6 +163,15 @@ export default function ClientsPage() {
     queryFn: async () => {
       const res = await api.get("/client-management/filter-options");
       return res.data;
+    }
+  });
+
+  // Fetch custom fields para registro
+  const { data: clientFields = [] } = useQuery({
+    queryKey: ["client-fields"],
+    queryFn: async () => {
+      const res = await api.get("/client-fields");
+      return res.data as ClientField[];
     }
   });
 
@@ -202,6 +246,25 @@ export default function ClientsPage() {
     }
   });
 
+  // Crear nuevo cliente
+  const createClientMutation = useMutation({
+    mutationFn: async (data: any) => {
+      await api.post("/client-fields/create-client", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["client-management"] });
+      setShowCreateClientModal(false);
+      setCreateClientForm({
+        fullName: "",
+        email: "",
+        password: "",
+        nit: "",
+        phoneNumber: "",
+        customFields: {}
+      });
+    }
+  });
+
   // Agrupar clientes
   const groupedClients: GroupedClients = clients.reduce((acc: GroupedClients, client: Client) => {
     let key: string;
@@ -239,9 +302,14 @@ export default function ClientsPage() {
   const handleEditProfile = (client: Client) => {
     setEditingClient(client);
     setProfileForm({
+      fullName: client.full_name || "",
+      email: client.email || "",
+      nit: client.nit || "",
+      phoneNumber: client.phone_number || "",
       sede: client.sede || "",
       grupo: client.grupo || "",
-      contractNumber: client.contract_number || ""
+      contractNumber: client.contract_number || "",
+      isActive: client.is_active === 1
     });
   };
 
@@ -260,6 +328,102 @@ export default function ClientsPage() {
       description: poolTaskForm.description,
       priority: poolTaskForm.priority
     });
+  };
+
+  const handleCreateClient = () => {
+    if (!createClientForm.fullName || !createClientForm.email) return;
+    createClientMutation.mutate({
+      fullName: createClientForm.fullName,
+      email: createClientForm.email,
+      password: createClientForm.password || undefined,
+      nit: createClientForm.nit || undefined,
+      phoneNumber: createClientForm.phoneNumber || undefined,
+      customFields: createClientForm.customFields
+    });
+  };
+
+  const renderCustomFieldInput = (field: ClientField) => {
+    const value = createClientForm.customFields[field.field_key] || '';
+
+    switch (field.field_type) {
+      case 'select':
+        return (
+          <select
+            value={value}
+            onChange={(e) => setCreateClientForm({
+              ...createClientForm,
+              customFields: { ...createClientForm.customFields, [field.field_key]: e.target.value }
+            })}
+            className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-orange-500"
+            required={field.is_required}
+          >
+            <option value="">Seleccionar...</option>
+            {field.select_options?.map((opt) => (
+              <option key={opt} value={opt}>{opt}</option>
+            ))}
+          </select>
+        );
+
+      case 'textarea':
+        return (
+          <textarea
+            value={value}
+            onChange={(e) => setCreateClientForm({
+              ...createClientForm,
+              customFields: { ...createClientForm.customFields, [field.field_key]: e.target.value }
+            })}
+            className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-orange-500"
+            placeholder={field.placeholder || ''}
+            rows={3}
+            required={field.is_required}
+          />
+        );
+
+      case 'checkbox':
+        return (
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={value === 'true'}
+              onChange={(e) => setCreateClientForm({
+                ...createClientForm,
+                customFields: { ...createClientForm.customFields, [field.field_key]: e.target.checked ? 'true' : 'false' }
+              })}
+              className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-orange-600 focus:ring-orange-500"
+            />
+            <span className="text-sm text-slate-300">{field.field_label}</span>
+          </label>
+        );
+
+      case 'date':
+        return (
+          <input
+            type="date"
+            value={value}
+            onChange={(e) => setCreateClientForm({
+              ...createClientForm,
+              customFields: { ...createClientForm.customFields, [field.field_key]: e.target.value }
+            })}
+            className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-orange-500"
+            required={field.is_required}
+          />
+        );
+
+      default:
+        return (
+          <input
+            type={field.field_type === 'email' ? 'email' : field.field_type === 'phone' ? 'tel' : field.field_type === 'number' ? 'number' : 'text'}
+            value={value}
+            onChange={(e) => setCreateClientForm({
+              ...createClientForm,
+              customFields: { ...createClientForm.customFields, [field.field_key]: e.target.value }
+            })}
+            className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-orange-500"
+            placeholder={field.placeholder || ''}
+            required={field.is_required}
+          />
+        );
+    }
   };
 
   const toggleSelectClient = (clientId: number) => {
@@ -290,14 +454,22 @@ export default function ClientsPage() {
     <div className="p-6 space-y-6 bg-slate-800 min-h-screen">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-white">Gestión de Clientes</h1>
-        {selectedClients.length > 0 && (
+        <div className="flex gap-3">
+          {selectedClients.length > 0 && (
+            <button
+              onClick={() => setShowBulkAssignModal(true)}
+              className="px-4 py-2 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-lg hover:from-orange-700 hover:to-amber-700 transition-all"
+            >
+              Asignar {selectedClients.length} seleccionados
+            </button>
+          )}
           <button
-            onClick={() => setShowBulkAssignModal(true)}
-            className="px-4 py-2 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-lg hover:from-orange-700 hover:to-amber-700 transition-all"
+            onClick={() => setShowCreateClientModal(true)}
+            className="px-4 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg hover:from-green-700 hover:to-emerald-700 transition-all"
           >
-            Asignar {selectedClients.length} seleccionados
+            + Nuevo Cliente
           </button>
-        )}
+        </div>
       </div>
 
       {/* Filtros */}
@@ -800,44 +972,110 @@ export default function ClientsPage() {
 
       {/* Modal de edición de perfil */}
       {editingClient && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-slate-900 border border-slate-700 rounded-lg p-6 w-full max-w-md">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <h2 className="text-xl font-semibold text-white mb-4">
-              Editar perfil: {editingClient.full_name}
+              Editar Cliente
             </h2>
 
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">Sede</label>
-                <input
-                  type="text"
-                  value={profileForm.sede}
-                  onChange={(e) => setProfileForm({ ...profileForm, sede: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-orange-500"
-                />
+              {/* Información básica */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Nombre completo *</label>
+                  <input
+                    type="text"
+                    value={profileForm.fullName}
+                    onChange={(e) => setProfileForm({ ...profileForm, fullName: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-orange-500"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Email *</label>
+                  <input
+                    type="email"
+                    value={profileForm.email}
+                    onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-orange-500"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">NIT</label>
+                  <input
+                    type="text"
+                    value={profileForm.nit}
+                    onChange={(e) => setProfileForm({ ...profileForm, nit: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-orange-500"
+                    placeholder="Ej: 12345678-9"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Teléfono</label>
+                  <input
+                    type="text"
+                    value={profileForm.phoneNumber}
+                    onChange={(e) => setProfileForm({ ...profileForm, phoneNumber: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-orange-500"
+                    placeholder="Ej: +502 1234 5678"
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">Grupo</label>
-                <input
-                  type="text"
-                  value={profileForm.grupo}
-                  onChange={(e) => setProfileForm({ ...profileForm, grupo: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-orange-500"
-                />
+              {/* Información organizacional */}
+              <div className="border-t border-slate-700 pt-4">
+                <h3 className="text-sm font-medium text-slate-400 mb-3">Información organizacional</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">Sede</label>
+                    <input
+                      type="text"
+                      value={profileForm.sede}
+                      onChange={(e) => setProfileForm({ ...profileForm, sede: e.target.value })}
+                      className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-orange-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">Grupo</label>
+                    <input
+                      type="text"
+                      value={profileForm.grupo}
+                      onChange={(e) => setProfileForm({ ...profileForm, grupo: e.target.value })}
+                      className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-orange-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">No. de contrato</label>
+                    <input
+                      type="text"
+                      value={profileForm.contractNumber}
+                      onChange={(e) => setProfileForm({ ...profileForm, contractNumber: e.target.value })}
+                      className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-orange-500"
+                    />
+                  </div>
+                </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">Número de contrato</label>
-                <input
-                  type="text"
-                  value={profileForm.contractNumber}
-                  onChange={(e) => setProfileForm({ ...profileForm, contractNumber: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-orange-500"
-                />
+              {/* Estado */}
+              <div className="border-t border-slate-700 pt-4">
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={profileForm.isActive}
+                    onChange={(e) => setProfileForm({ ...profileForm, isActive: e.target.checked })}
+                    className="w-5 h-5 rounded border-slate-600 bg-slate-700 text-orange-600 focus:ring-orange-500"
+                  />
+                  <span className="text-sm font-medium text-slate-300">Cliente activo</span>
+                </label>
               </div>
 
-              <div className="flex gap-3 justify-end">
+              <div className="flex gap-3 justify-end pt-4 border-t border-slate-700">
                 <button
                   onClick={() => setEditingClient(null)}
                   className="px-4 py-2 bg-slate-800 text-slate-300 rounded-lg hover:bg-slate-700"
@@ -846,10 +1084,10 @@ export default function ClientsPage() {
                 </button>
                 <button
                   onClick={handleSaveProfile}
-                  disabled={updateProfileMutation.isPending}
+                  disabled={updateProfileMutation.isPending || !profileForm.fullName || !profileForm.email}
                   className="px-4 py-2 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-lg hover:from-orange-700 hover:to-amber-700 disabled:opacity-50"
                 >
-                  {updateProfileMutation.isPending ? "Guardando..." : "Guardar"}
+                  {updateProfileMutation.isPending ? "Guardando..." : "Guardar cambios"}
                 </button>
               </div>
             </div>
@@ -921,6 +1159,136 @@ export default function ClientsPage() {
                   className="px-4 py-2 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-lg hover:from-orange-700 hover:to-amber-700 disabled:opacity-50"
                 >
                   {addPoolTaskMutation.isPending ? "Agregando..." : "Agregar"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para crear nuevo cliente */}
+      {showCreateClientModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <h2 className="text-xl font-semibold text-white mb-4">
+              Nuevo Cliente
+            </h2>
+
+            <div className="space-y-4">
+              {/* Campos básicos obligatorios */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    Nombre completo *
+                  </label>
+                  <input
+                    type="text"
+                    value={createClientForm.fullName}
+                    onChange={(e) => setCreateClientForm({ ...createClientForm, fullName: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-orange-500"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    Email *
+                  </label>
+                  <input
+                    type="email"
+                    value={createClientForm.email}
+                    onChange={(e) => setCreateClientForm({ ...createClientForm, email: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-orange-500"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    NIT
+                  </label>
+                  <input
+                    type="text"
+                    value={createClientForm.nit}
+                    onChange={(e) => setCreateClientForm({ ...createClientForm, nit: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-orange-500"
+                    placeholder="Ej: 12345678-9"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    Teléfono
+                  </label>
+                  <input
+                    type="tel"
+                    value={createClientForm.phoneNumber}
+                    onChange={(e) => setCreateClientForm({ ...createClientForm, phoneNumber: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-orange-500"
+                    placeholder="Ej: +502 1234 5678"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    Contraseña
+                    <span className="text-slate-500 ml-2">(Si no se especifica, se usará "Cliente123!")</span>
+                  </label>
+                  <input
+                    type="password"
+                    value={createClientForm.password}
+                    onChange={(e) => setCreateClientForm({ ...createClientForm, password: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-orange-500"
+                    placeholder="Dejar vacío para usar contraseña por defecto"
+                  />
+                </div>
+              </div>
+
+              {/* Campos personalizados */}
+              {clientFields.filter(f => f.show_in_registration).length > 0 && (
+                <div className="border-t border-slate-700 pt-4">
+                  <h3 className="text-sm font-medium text-slate-400 mb-3">Información adicional</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {clientFields
+                      .filter(f => f.show_in_registration)
+                      .map(field => (
+                        <div key={field.id} className={field.field_type === 'textarea' ? 'md:col-span-2' : ''}>
+                          {field.field_type !== 'checkbox' && (
+                            <label className="block text-sm font-medium text-slate-300 mb-2">
+                              {field.field_label}
+                              {field.is_required && <span className="text-orange-400 ml-1">*</span>}
+                            </label>
+                          )}
+                          {renderCustomFieldInput(field)}
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-3 justify-end pt-4 border-t border-slate-700">
+                <button
+                  onClick={() => {
+                    setShowCreateClientModal(false);
+                    setCreateClientForm({
+                      fullName: "",
+                      email: "",
+                      password: "",
+                      nit: "",
+                      phoneNumber: "",
+                      customFields: {}
+                    });
+                  }}
+                  className="px-4 py-2 bg-slate-800 text-slate-300 rounded-lg hover:bg-slate-700"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleCreateClient}
+                  disabled={createClientMutation.isPending || !createClientForm.fullName || !createClientForm.email}
+                  className="px-4 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg hover:from-green-700 hover:to-emerald-700 disabled:opacity-50"
+                >
+                  {createClientMutation.isPending ? "Creando..." : "Crear Cliente"}
                 </button>
               </div>
             </div>

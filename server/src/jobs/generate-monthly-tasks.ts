@@ -13,6 +13,7 @@ interface ClientService {
   custom_price: number | null;
   default_price: number;
   recurrence_type: string;
+  recurrence_type_extended: string | null;
   is_active: boolean;
 }
 
@@ -31,6 +32,7 @@ export async function generateMonthlyTasks(tenantSlug: string, targetYear?: numb
 
   try {
     // 1. Obtener todos los clientes activos con sus servicios
+    // EXCLUIR servicios variables y bajo demanda (se manejan diferente)
     const [clientServices]: any = await db.query(`
       SELECT
         cs.client_user_id as client_id,
@@ -39,6 +41,7 @@ export async function generateMonthlyTasks(tenantSlug: string, targetYear?: numb
         s.service_name,
         s.default_price,
         s.recurrence_type,
+        s.recurrence_type_extended,
         s.is_active as service_active
       FROM client_services cs
       JOIN services s ON s.id = cs.service_id
@@ -46,6 +49,8 @@ export async function generateMonthlyTasks(tenantSlug: string, targetYear?: numb
       WHERE cs.status = 'active'
         AND u.is_active = 1
         AND s.is_active = TRUE
+        AND (s.recurrence_type_extended IS NULL OR s.recurrence_type_extended NOT IN ('variable', 'on_demand'))
+        AND s.recurrence_type <> 'custom'
       ORDER BY cs.client_user_id
     `);
 

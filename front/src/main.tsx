@@ -3,38 +3,53 @@ import ReactDOM from 'react-dom/client';
 import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
+import { Capacitor } from '@capacitor/core';
 
 import AppLayout from './ui/AppLayout';
 import Protected from './ui/Protected';
 import BoardPage from './pages/admin/BoardPage';
 import LoginPage from './pages/auth/LoginPage';
+import ClientLoginPage from './pages/auth/ClientLoginPage';
+import ClientRegisterPage from './pages/auth/ClientRegisterPage';
 import ClientsPage from './pages/admin/ClientsPage';
 import TasksPage from './pages/admin/TasksPage';
 import TaskDetailPage from './pages/admin/TaskDetailPage';
 import MyClientsPage from './pages/admin/MyClientsPage';
 import ClientDetail from './pages/admin/ClientDetail';
 import ServicesPage from './pages/admin/ServicesPage';
+import BundlesPage from './pages/admin/BundlesPage';
 import ClientDashboard from './pages/client/ClientDashboard';
-import InvoicesPage from './pages/common/InvoicesPage';
+import ClientMobileApp from './pages/client/ClientMobileApp';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import FinancialManagementPage from './pages/admin/FinancialManagementPage';
 import WorkspacesPage from './pages/admin/WorkspacesPage';
+import InvitationsPage from './pages/admin/InvitationsPage';
+import ClientFieldsPage from './pages/admin/ClientFieldsPage';
 
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { WorkspaceProvider } from './context/WorkspaceContext';
 import './index.css';
 
-// Redirección inteligente según rol
+// Detectar si es app móvil
+const isNativePlatform = Capacitor.isNativePlatform();
+
+// Redirección inteligente según rol y plataforma
 function IndexRedirect() {
   const { user } = useAuth();
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) {
+    // En app móvil, ir directo al login de clientes
+    return <Navigate to={isNativePlatform ? "/client/login" : "/login"} replace />;
+  }
   if (user.role === 'client') return <Navigate to="/client/dashboard" replace />;
   // Admin/Employee por defecto a tareas
   return <Navigate to="/admin/tasks" replace />;
 }
 
 const router = createBrowserRouter([
-  { path: '/login', element: <LoginPage /> },
+  // En móvil, /login redirige a ClientLoginPage
+  { path: '/login', element: isNativePlatform ? <ClientLoginPage /> : <LoginPage /> },
+  { path: '/client/login', element: <ClientLoginPage /> },
+  { path: '/client/register', element: <ClientRegisterPage /> },
   {
     path: '/',
     element: (
@@ -111,6 +126,14 @@ const router = createBrowserRouter([
         ),
       },
       {
+        path: 'admin/bundles',
+        element: (
+          <Protected roles={['admin']}>
+            <BundlesPage />
+          </Protected>
+        ),
+      },
+      {
         path: 'admin/workspaces',
         element: (
           <Protected roles={['admin']}>
@@ -118,28 +141,34 @@ const router = createBrowserRouter([
           </Protected>
         ),
       },
+      {
+        path: 'admin/invitations',
+        element: (
+          <Protected roles={['admin']}>
+            <InvitationsPage />
+          </Protected>
+        ),
+      },
+      {
+        path: 'admin/client-fields',
+        element: (
+          <Protected roles={['admin']}>
+            <ClientFieldsPage />
+          </Protected>
+        ),
+      },
 
-      // Cliente
+      // Cliente - En móvil usa ClientMobileApp, en web usa ClientDashboard
       {
         path: 'client/dashboard',
         element: (
           <Protected roles={['client']}>
-            <ClientDashboard />
+            {isNativePlatform ? <ClientMobileApp /> : <ClientDashboard />}
           </Protected>
         ),
       },
 
       { path: 'admin/brigade', element: <BoardPage /> },
-
-      // Común (si quieres restringir, añade roles)
-      {
-        path: 'invoices',
-        element: (
-          <Protected roles={['admin','client']}>
-            <InvoicesPage />
-          </Protected>
-        ),
-      },
     ],
   },
 ]);

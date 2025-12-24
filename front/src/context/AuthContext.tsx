@@ -9,6 +9,7 @@ type AuthCtx = {
   token: string | null
   initialized: boolean
   login: (email: string, password: string, tenant?: string) => Promise<void>
+  setAuth: (token: string, user: User) => void
   logout: () => void
 }
 
@@ -26,17 +27,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setInitialized(true)
   }, [])
 
-const login = async (email: string, password: string, tenant?: string) => {
-  const resp = await api.post<LoginResponse>("/auth/login", { email, password }, {
-    headers: tenant ? { "X-Tenant": tenant } : {},
-  });
+  const login = async (email: string, password: string, tenant?: string) => {
+    const resp = await api.post<LoginResponse>("/auth/login", { email, password }, {
+      headers: tenant ? { "X-Tenant": tenant } : {},
+    });
 
-  setToken(resp.data.token);
-  setUser(resp.data.user);
-  localStorage.setItem("token", resp.data.token);
-  localStorage.setItem("user", JSON.stringify(resp.data.user));
-  if (tenant) setTenant(tenant); // <-- guarda el tenant
-};
+    setToken(resp.data.token);
+    setUser(resp.data.user);
+    localStorage.setItem("token", resp.data.token);
+    localStorage.setItem("user", JSON.stringify(resp.data.user));
+    if (tenant) setTenant(tenant);
+  };
+
+  // Para login directo (ClientLoginPage, etc.) sin llamar API desde aquí
+  const setAuth = (newToken: string, newUser: User) => {
+    setToken(newToken);
+    setUser(newUser);
+    localStorage.setItem("token", newToken);
+    localStorage.setItem("user", JSON.stringify(newUser));
+  };
 
   const logout = () => {
     setToken(null); setUser(null)
@@ -45,7 +54,7 @@ const login = async (email: string, password: string, tenant?: string) => {
   }
 
   return (
-    <AuthContext.Provider value={{ user, token, initialized, login, logout }}>
+    <AuthContext.Provider value={{ user, token, initialized, login, setAuth, logout }}>
       {children}
     </AuthContext.Provider>
   )

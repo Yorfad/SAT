@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { Outlet, NavLink } from "react-router-dom";
+import { Capacitor } from "@capacitor/core";
 import { useAuth } from "../context/AuthContext";
 import { useSettings } from "../hooks/useSettings";
 import WorkspaceSelector from "./WorkspaceSelector";
@@ -6,11 +8,34 @@ import WorkspaceSelector from "./WorkspaceSelector";
 export default function AppLayout() {
   const { user, logout } = useAuth();
   const { data: settings } = useSettings();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // En móvil para clientes, no mostrar sidebar (tienen su propio layout)
+  const isMobile = Capacitor.isNativePlatform();
+  const isClient = user?.role === 'client';
+
+  // Si es cliente en móvil, renderizar solo el contenido
+  if (isMobile && isClient) {
+    return <Outlet />;
+  }
 
   return (
     <div className="min-h-screen flex bg-slate-900">
+      {/* Overlay para cerrar sidebar en móvil */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
-      <aside className="w-64 bg-slate-950 border-r border-slate-800 flex flex-col shadow-2xl">
+      <aside className={`
+        fixed lg:static inset-y-0 left-0 z-50
+        w-64 bg-slate-950 border-r border-slate-800 flex flex-col shadow-2xl
+        transform transition-transform duration-300 ease-in-out
+        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+      `}>
         {/* Logo y Nombre */}
         <div className="p-6 border-b border-slate-800">
           <div className="flex items-center gap-3">
@@ -138,7 +163,7 @@ export default function AppLayout() {
               </NavLink>
 
               <NavLink
-                to="/invoices"
+                to="/admin/bundles"
                 className={({ isActive }) =>
                   `flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
                     isActive
@@ -148,10 +173,43 @@ export default function AppLayout() {
                 }
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2zM10 8.5a.5.5 0 11-1 0 .5.5 0 011 0zm5 5a.5.5 0 11-1 0 .5.5 0 011 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
                 </svg>
-                Facturación
+                Bundles
               </NavLink>
+
+              <NavLink
+                to="/admin/invitations"
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
+                    isActive
+                      ? "bg-gradient-to-r from-orange-600 to-amber-600 text-white shadow-lg shadow-orange-900/50"
+                      : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                  }`
+                }
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+                </svg>
+                Invitaciones
+              </NavLink>
+
+              <NavLink
+                to="/admin/client-fields"
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
+                    isActive
+                      ? "bg-gradient-to-r from-orange-600 to-amber-600 text-white shadow-lg shadow-orange-900/50"
+                      : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                  }`
+                }
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Campos de Cliente
+              </NavLink>
+
             </>
           )}
 
@@ -207,22 +265,6 @@ export default function AppLayout() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
                 </svg>
                 Mi Panel
-              </NavLink>
-
-              <NavLink
-                to="/invoices"
-                className={({ isActive }) =>
-                  `flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
-                    isActive
-                      ? "bg-gradient-to-r from-orange-600 to-amber-600 text-white shadow-lg shadow-orange-900/50"
-                      : "text-slate-300 hover:bg-slate-800 hover:text-white"
-                  }`
-                }
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2zM10 8.5a.5.5 0 11-1 0 .5.5 0 011 0zm5 5a.5.5 0 11-1 0 .5.5 0 011 0z" />
-                </svg>
-                Mis Facturas
               </NavLink>
             </>
           )}

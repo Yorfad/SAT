@@ -15,7 +15,12 @@ import {
   deactivateClient,
   activateClient,
   deactivateClientService,
-  activateClientService
+  activateClientService,
+  getClientTasks,
+  approveTask,
+  rejectTask,
+  requestService,
+  getAvailableServices
 } from "../controllers/client.controller";
 
 
@@ -25,6 +30,16 @@ router.use(resolveWorkspace);
 router.use(loadWorkspaceId);
 
 router.get("/dashboard", requireRoles("client"), getClientDashboard);
+
+// Endpoints para cliente móvil
+router.get("/my-tasks", requireRoles("client"), getClientTasks);
+router.get("/available-services", requireRoles("client"), getAvailableServices);
+router.post("/tasks/:id/approve", requireRoles("client"), approveTask);
+router.post("/tasks/:id/reject", requireRoles("client"), validate(z.object({ body: z.object({
+  reason: z.string().min(1, "El motivo es requerido")
+}) })), rejectTask);
+router.post("/request-service", requireRoles("client"), requestService);
+
 router.get("/", requireRoles("admin","employee"), listClients);
 router.get("/:id", requireRoles("admin","employee","client"), getClientById);
 

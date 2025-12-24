@@ -124,51 +124,90 @@ export const bulkAssignClients: RequestHandler = async (req: any, res: any) => {
 
 /**
  * PATCH /api/admin/clients/:id/profile
- * Actualizar perfil de cliente (sede, grupo, etc.)
+ * Actualizar perfil de cliente (datos personales + sede, grupo, etc.)
  */
 export const updateClientProfile: RequestHandler = async (req: any, res: any) => {
   const { id } = req.params;
-  const { sede, grupo, contractNumber, notes } = req.body;
+  const { fullName, email, nit, phoneNumber, isActive, sede, grupo, contractNumber, notes } = req.body;
 
   try {
-    const updates: string[] = [];
-    const params: any[] = [];
+    // Actualizar tabla users (datos básicos)
+    const userUpdates: string[] = [];
+    const userParams: any[] = [];
+
+    if (fullName !== undefined) {
+      userUpdates.push('full_name = ?');
+      userParams.push(fullName);
+    }
+
+    if (email !== undefined) {
+      userUpdates.push('email = ?');
+      userParams.push(email);
+    }
+
+    if (nit !== undefined) {
+      userUpdates.push('nit = ?');
+      userParams.push(nit || null);
+    }
+
+    if (phoneNumber !== undefined) {
+      userUpdates.push('phone_number = ?');
+      userParams.push(phoneNumber || null);
+    }
+
+    if (isActive !== undefined) {
+      userUpdates.push('is_active = ?');
+      userParams.push(isActive ? 1 : 0);
+    }
+
+    if (userUpdates.length > 0) {
+      userParams.push(id);
+      await req.db.query(
+        `UPDATE users SET ${userUpdates.join(', ')} WHERE id = ?`,
+        userParams
+      );
+    }
+
+    // Actualizar tabla clients_profiles (datos organizacionales)
+    const profileUpdates: string[] = [];
+    const profileParams: any[] = [];
 
     if (sede !== undefined) {
-      updates.push('sede = ?');
-      params.push(sede);
+      profileUpdates.push('sede = ?');
+      profileParams.push(sede || null);
     }
 
     if (grupo !== undefined) {
-      updates.push('grupo = ?');
-      params.push(grupo);
+      profileUpdates.push('grupo = ?');
+      profileParams.push(grupo || null);
     }
 
     if (contractNumber !== undefined) {
-      updates.push('contract_number = ?');
-      params.push(contractNumber);
+      profileUpdates.push('contract_number = ?');
+      profileParams.push(contractNumber || null);
     }
 
     if (notes !== undefined) {
-      updates.push('notes = ?');
-      params.push(notes);
+      profileUpdates.push('notes = ?');
+      profileParams.push(notes || null);
     }
 
-    if (updates.length === 0) {
+    if (profileUpdates.length > 0) {
+      profileParams.push(id);
+      await req.db.query(
+        `UPDATE clients_profiles SET ${profileUpdates.join(', ')} WHERE user_id = ?`,
+        profileParams
+      );
+    }
+
+    if (userUpdates.length === 0 && profileUpdates.length === 0) {
       return res.status(400).json({ error: 'No hay campos para actualizar' });
     }
 
-    params.push(id);
-
-    await req.db.query(
-      `UPDATE clients_profiles SET ${updates.join(', ')} WHERE user_id = ?`,
-      params
-    );
-
-    res.json({ success: true, message: 'Perfil actualizado correctamente' });
+    res.json({ success: true, message: 'Cliente actualizado correctamente' });
   } catch (error) {
-    console.error('Error actualizando perfil de cliente:', error);
-    res.status(500).json({ error: 'Error al actualizar perfil' });
+    console.error('Error actualizando cliente:', error);
+    res.status(500).json({ error: 'Error al actualizar cliente' });
   }
 };
 

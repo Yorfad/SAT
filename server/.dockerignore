@@ -1,0 +1,32 @@
+# Dependencias
+node_modules
+npm-debug.log
+
+# Build
+dist
+
+# Archivos de desarrollo
+.env
+.env.local
+*.log
+
+# IDE
+.vscode
+.idea
+
+# Git
+.git
+.gitignore
+
+# Uploads locales (se montan como volumen)
+uploads/*
+!uploads/.gitkeep
+
+# Tests
+coverage
+*.test.ts
+__tests__
+
+# Docs
+*.md
+!README.md

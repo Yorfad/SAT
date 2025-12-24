@@ -330,7 +330,7 @@ export const getConsolidatedDashboard: RequestHandler = async (req: any, res) =>
 
     const byWorkspace = ingresosData.map((ws: any) => {
       const ingresos = Number(ws.ingresos);
-      const gastos = gastosMap.get(ws.workspace_id) || 0;
+      const gastos = Number(gastosMap.get(ws.workspace_id) || 0);
       return {
         workspace_id: ws.workspace_id,
         workspace_name: ws.workspace_name,

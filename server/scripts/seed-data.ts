@@ -119,9 +119,9 @@ async function seedData() {
     // Insertar clientes asignados (2 al admin, 1 al employee)
     await db.query(`
       INSERT INTO users (email, password_hash, full_name, role, nit, is_active, assigned_to_user_id) VALUES
-      ('cliente1@example.com', ?, 'Juan Pérez', 'client', '1234-567890-001-2', 1, ?),
-      ('cliente2@example.com', ?, 'María García', 'client', '9876-543210-001-3', 1, ?),
-      ('cliente3@example.com', ?, 'Carlos Rodríguez', 'client', '5555-123456-001-4', 1, ?)
+      ('cliente1@example.com', ?, 'Juan Pérez', 'client', '1234567890012', 1, ?),
+      ('cliente2@example.com', ?, 'María García', 'client', '9876543210013', 1, ?),
+      ('cliente3@example.com', ?, 'Carlos Rodríguez', 'client', '5555123456014', 1, ?)
     `, [passwordHash, adminId, passwordHash, adminId, passwordHash, employeeId]);
 
     // Obtener IDs de clientes

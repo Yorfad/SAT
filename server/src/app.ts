@@ -8,6 +8,8 @@ import { env } from "./config/env";
 
 import publicRoutes from "./routes/public.routes";
 import authRoutes from "./routes/auth.routes";
+import { mobileClientLogin } from "./controllers/auth.controller";
+import { publicValidateCode, publicRegisterWithCode } from "./controllers/invitation.controller";
 import clientsRoutes from "./routes/clients.routes";
 import servicesRoutes from "./routes/services.routes";
 import invoicesRoutes from "./routes/invoices.routes";
@@ -26,6 +28,8 @@ import clientPrioritiesRoutes from "./routes/client-priorities.routes";
 import userManagementRoutes from "./routes/user-management.routes";
 import rolesPermissionsRoutes from "./routes/roles-permissions.routes";
 import workspaceRoutes from "./routes/workspace.routes";
+import invitationsRoutes from "./routes/invitations.routes";
+import clientFieldsRoutes from "./routes/client-fields.routes";
 
 
 import { resolveTenant } from "./middleware/resolveTenant";
@@ -35,12 +39,45 @@ import { errorHandler } from "./middleware/error";
 
 const app = express();
 app.use(helmet());
-app.use(cors({ origin: env.corsOrigin }));
+// CORS: permitir orígenes configurados + apps móviles Capacitor
+app.use(cors({
+  origin: (origin, callback) => {
+    // Permitir requests sin origin (apps móviles, Postman, curl)
+    if (!origin) return callback(null, true);
+    // Permitir orígenes de Capacitor
+    if (origin.startsWith('capacitor://') || origin.startsWith('http://localhost')) {
+      return callback(null, true);
+    }
+    // Permitir orígenes configurados
+    if (env.corsOrigin.includes(origin)) {
+      return callback(null, true);
+    }
+    // En desarrollo, permitir todo
+    if (process.env.NODE_ENV !== 'production') {
+      return callback(null, true);
+    }
+    callback(new Error('CORS no permitido'));
+  },
+  credentials: true
+}));
 app.use(express.json({ limit: "2mb" }));
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 
 
-// Público: solo requiere tenant para branding
+// Health check (sin tenant, para Docker healthcheck)
+app.get("/api/health", (_req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
+
+// Login móvil de clientes: NO requiere tenant (busca en todos los tenants)
+const mobileAuthLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 50 });
+app.post("/api/auth/mobile/login", mobileAuthLimiter, mobileClientLogin);
+
+// Registro con código de invitación: NO requiere tenant (busca el código en todos los tenants)
+// IMPORTANTE: Registrar ANTES de publicRoutes para evitar conflicto con resolveTenant
+const registerLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20 });
+app.post("/api/public/validate-code", registerLimiter, publicValidateCode);
+app.post("/api/public/register-with-code", registerLimiter, publicRegisterWithCode);
+
+// Público: rutas que requieren tenant para branding (DESPUÉS de las rutas sin tenant)
 app.use("/api/public", publicRoutes);
 
 
@@ -72,9 +109,9 @@ app.use("/api/priorities", clientPrioritiesRoutes);
 app.use("/api/user-management", userManagementRoutes);
 app.use("/api/roles-permissions", rolesPermissionsRoutes);
 app.use("/api/workspaces", workspaceRoutes);
+app.use("/api/invitations", invitationsRoutes);
+app.use("/api/client-fields", clientFieldsRoutes);
 
-
-app.get("/api/health", (_req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
 
 app.use(errorHandler);
 

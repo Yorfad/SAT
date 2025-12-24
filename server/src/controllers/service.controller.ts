@@ -2,28 +2,57 @@ import { Request, Response } from "express";
 
 /**
  * GET /services
- * Lista todos los servicios
+ * Lista servicios (globales + del workspace actual)
  */
-export async function listServices(_req: Request, res: Response) {
+export async function listServices(req: Request, res: Response) {
   try {
-    const [rows] = await _req.db!.query(`
+    const isConsolidated = (req as any).isConsolidatedView;
+    const workspaceId = (req as any).workspaceId;
+    const accessibleIds = (req as any).accessibleWorkspaceIds || [];
+
+    let query = `
       SELECT
         id,
+        workspace_id,
         service_name,
         description,
         default_price,
+        operational_cost,
         recurrence_type,
+        recurrence_type_extended,
         recurrence_days,
         activation_day,
         activation_window_days,
         requires_file,
+        file_config,
         completion_determines_next,
         is_on_request,
         is_active,
+        is_global,
+        employee_notes,
+        client_notes,
+        assignment_type,
+        visible_to_clients,
+        allow_subscription,
         created_at
       FROM services
-      ORDER BY service_name
-    `);
+      WHERE is_active = TRUE
+    `;
+    const params: any[] = [];
+
+    // Filtrar por workspace: mostrar globales + del workspace actual
+    if (!isConsolidated && workspaceId) {
+      query += ` AND (is_global = TRUE OR workspace_id = ?)`;
+      params.push(workspaceId);
+    } else if (isConsolidated && accessibleIds.length > 0) {
+      const placeholders = accessibleIds.map(() => '?').join(',');
+      query += ` AND (is_global = TRUE OR workspace_id IN (${placeholders}))`;
+      params.push(...accessibleIds);
+    }
+
+    query += ` ORDER BY is_global DESC, service_name ASC`;
+
+    const [rows] = await req.db!.query(query, params);
     res.json(rows);
   } catch (error: any) {
     console.error('Error listing services:', error);
@@ -42,17 +71,27 @@ export async function getService(req: Request, res: Response) {
     const [rows]: any = await req.db!.query(`
       SELECT
         id,
+        workspace_id,
         service_name,
         description,
         default_price,
+        operational_cost,
         recurrence_type,
+        recurrence_type_extended,
         recurrence_days,
         activation_day,
         activation_window_days,
         requires_file,
+        file_config,
         completion_determines_next,
         is_on_request,
         is_active,
+        is_global,
+        employee_notes,
+        client_notes,
+        assignment_type,
+        visible_to_clients,
+        allow_subscription,
         created_at
       FROM services
       WHERE id = ?
@@ -75,18 +114,28 @@ export async function getService(req: Request, res: Response) {
  */
 export async function createService(req: Request, res: Response) {
   try {
+    const workspaceId = (req as any).workspaceId;
     const {
       service_name,
       description = null,
       default_price,
+      operational_cost = 0,
       recurrence_type = 'monthly',
+      recurrence_type_extended = 'monthly',
       recurrence_days = null,
       activation_day = 25,
       activation_window_days = 7,
       requires_file = true,
+      file_config = 'required',
       completion_determines_next = false,
       is_on_request = false,
-      is_active = true
+      is_active = true,
+      is_global = false,
+      employee_notes = null,
+      client_notes = null,
+      assignment_type = 'selected_clients',
+      visible_to_clients = true,
+      allow_subscription = false
     } = req.body;
 
     // Validaciones
@@ -108,30 +157,50 @@ export async function createService(req: Request, res: Response) {
 
     const [result] = await req.db!.query(
       `INSERT INTO services (
+        workspace_id,
         service_name,
         description,
         default_price,
+        operational_cost,
         recurrence_type,
+        recurrence_type_extended,
         recurrence_days,
         activation_day,
         activation_window_days,
         requires_file,
+        file_config,
         completion_determines_next,
         is_on_request,
-        is_active
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        is_active,
+        is_global,
+        employee_notes,
+        client_notes,
+        assignment_type,
+        visible_to_clients,
+        allow_subscription
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
+        is_global ? null : workspaceId,
         service_name,
         description,
         default_price,
+        operational_cost,
         recurrence_type,
+        recurrence_type_extended,
         recurrence_days,
         activation_day,
         activation_window_days,
         requires_file,
+        file_config,
         completion_determines_next,
         is_on_request,
-        is_active
+        is_active,
+        is_global,
+        employee_notes,
+        client_notes,
+        assignment_type,
+        visible_to_clients,
+        allow_subscription
       ]
     );
 
@@ -153,14 +222,22 @@ export async function updateService(req: Request, res: Response) {
       service_name,
       description,
       default_price,
+      operational_cost,
       recurrence_type,
+      recurrence_type_extended,
       recurrence_days,
       activation_day,
       activation_window_days,
       requires_file,
+      file_config,
       completion_determines_next,
       is_on_request,
-      is_active
+      is_active,
+      employee_notes,
+      client_notes,
+      assignment_type,
+      visible_to_clients,
+      allow_subscription
     } = req.body;
 
     // Verificar que el servicio existe
@@ -187,27 +264,43 @@ export async function updateService(req: Request, res: Response) {
         service_name = ?,
         description = ?,
         default_price = ?,
+        operational_cost = ?,
         recurrence_type = ?,
+        recurrence_type_extended = ?,
         recurrence_days = ?,
         activation_day = ?,
         activation_window_days = ?,
         requires_file = ?,
+        file_config = ?,
         completion_determines_next = ?,
         is_on_request = ?,
-        is_active = ?
+        is_active = ?,
+        employee_notes = ?,
+        client_notes = ?,
+        assignment_type = ?,
+        visible_to_clients = ?,
+        allow_subscription = ?
       WHERE id = ?`,
       [
         service_name,
         description,
         default_price,
+        operational_cost,
         recurrence_type,
+        recurrence_type_extended,
         recurrence_days,
         activation_day,
         activation_window_days,
         requires_file,
+        file_config,
         completion_determines_next,
         is_on_request,
         is_active,
+        employee_notes,
+        client_notes,
+        assignment_type,
+        visible_to_clients,
+        allow_subscription,
         id
       ]
     );

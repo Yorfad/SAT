@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { useWorkspace, CONSOLIDATED_WORKSPACE } from '../context/WorkspaceContext';
+import { useWorkspace } from '../context/WorkspaceContext';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 

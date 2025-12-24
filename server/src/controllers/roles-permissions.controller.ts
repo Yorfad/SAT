@@ -1,5 +1,4 @@
 import { RequestHandler } from 'express';
-import { RowDataPacket } from 'mysql2/promise';
 
 /**
  * Lista todos los roles del tenant
@@ -55,7 +54,7 @@ export const listRoles: RequestHandler = async (req: any, res: any) => {
       ORDER BY r.is_system_role DESC, r.role_name ASC
     `;
 
-    const [roles] = await req.db.execute<RowDataPacket[]>(query, [req.user.tenant]);
+    const [roles]: any = await req.db.execute(query, [req.user.tenant]);
 
     res.json({ roles });
   } catch (error) {
@@ -77,7 +76,7 @@ export const getRoleDetails: RequestHandler = async (req: any, res: any) => {
       WHERE id = ? AND tenant_id = ?
     `;
 
-    const [roles] = await req.db.execute<RowDataPacket[]>(roleQuery, [
+    const [roles]: any = await req.db.execute(roleQuery, [
       roleId,
       req.user.tenant,
     ]);
@@ -107,7 +106,7 @@ export const getRoleDetails: RequestHandler = async (req: any, res: any) => {
       ORDER BY sp.display_order, sp.page_name, sa.action_name
     `;
 
-    const [permissions] = await req.db.execute<RowDataPacket[]>(permissionsQuery, [roleId]);
+    const [permissions]: any = await req.db.execute(permissionsQuery, [roleId]);
 
     // Obtener usuarios con este rol
     const usersQuery = `
@@ -125,7 +124,7 @@ export const getRoleDetails: RequestHandler = async (req: any, res: any) => {
       ORDER BY ur.granted_at DESC
     `;
 
-    const [users] = await req.db.execute<RowDataPacket[]>(usersQuery, [roleId]);
+    const [users]: any = await req.db.execute(usersQuery, [roleId]);
 
     res.json({
       role,
@@ -153,7 +152,7 @@ export const createRole: RequestHandler = async (req: any, res: any) => {
 
     // Verificar que el role_key no exista
     const checkQuery = 'SELECT id FROM roles WHERE tenant_id = ? AND role_key = ?';
-    const [existing] = await req.db.execute<RowDataPacket[]>(checkQuery, [
+    const [existing]: any = await req.db.execute(checkQuery, [
       req.user.tenant,
       role_key,
     ]);
@@ -168,7 +167,7 @@ export const createRole: RequestHandler = async (req: any, res: any) => {
       VALUES (?, ?, ?, ?, FALSE, ?)
     `;
 
-    const [result] = await req.db.execute<any>(insertQuery, [
+    const [result]: any = await req.db.execute(insertQuery, [
       req.user.tenant,
       role_key,
       role_name,
@@ -210,7 +209,7 @@ export const updateRole: RequestHandler = async (req: any, res: any) => {
 
     // Verificar que el rol existe y no es un rol del sistema
     const checkQuery = 'SELECT is_system_role FROM roles WHERE id = ? AND tenant_id = ?';
-    const [roles] = await req.db.execute<RowDataPacket[]>(checkQuery, [
+    const [roles]: any = await req.db.execute(checkQuery, [
       roleId,
       req.user.tenant,
     ]);
@@ -271,7 +270,7 @@ export const deleteRole: RequestHandler = async (req: any, res: any) => {
 
     // Verificar que el rol existe y no es un rol del sistema
     const checkQuery = 'SELECT is_system_role FROM roles WHERE id = ? AND tenant_id = ?';
-    const [roles] = await req.db.execute<RowDataPacket[]>(checkQuery, [
+    const [roles]: any = await req.db.execute(checkQuery, [
       roleId,
       req.user.tenant,
     ]);
@@ -323,7 +322,7 @@ export const listPermissions: RequestHandler = async (req: any, res: any) => {
       ORDER BY sp.display_order, sp.page_name, sa.action_name
     `;
 
-    const [permissions] = await req.db.execute<RowDataPacket[]>(query);
+    const [permissions]: any = await req.db.execute(query);
 
     if (group_by === 'page') {
       // Agrupar por página
@@ -374,7 +373,7 @@ export const assignPermissionsToRole: RequestHandler = async (req: any, res: any
 
     // Verificar que el rol existe
     const checkQuery = 'SELECT id FROM roles WHERE id = ? AND tenant_id = ?';
-    const [roles] = await req.db.execute<RowDataPacket[]>(checkQuery, [
+    const [roles]: any = await req.db.execute(checkQuery, [
       roleId,
       req.user.tenant,
     ]);
@@ -415,7 +414,7 @@ export const revokePermissionsFromRole: RequestHandler = async (req: any, res: a
 
     // Verificar que el rol existe
     const checkQuery = 'SELECT id FROM roles WHERE id = ? AND tenant_id = ?';
-    const [roles] = await req.db.execute<RowDataPacket[]>(checkQuery, [
+    const [roles]: any = await req.db.execute(checkQuery, [
       roleId,
       req.user.tenant,
     ]);
@@ -462,7 +461,7 @@ export const assignRoleToUser: RequestHandler = async (req: any, res: any) => {
         AND r.id = ? AND r.tenant_id = ?
     `;
 
-    const [check] = await req.db.execute<RowDataPacket[]>(checkQuery, [
+    const [check]: any = await req.db.execute(checkQuery, [
       userId,
       req.user.tenant,
       role_id,
@@ -518,7 +517,7 @@ export const revokeRoleFromUser: RequestHandler = async (req: any, res: any) => 
       WHERE ur.user_id = ? AND ur.role_id = ? AND u.tenant_id = ?
     `;
 
-    const [result] = await req.db.execute<any>(deleteQuery, [
+    const [result]: any = await req.db.execute(deleteQuery, [
       userId,
       roleId,
       req.user.tenant,
@@ -550,7 +549,7 @@ export const assignPermissionToUser: RequestHandler = async (req: any, res: any)
 
     // Verificar que el usuario existe
     const checkQuery = 'SELECT id FROM users WHERE id = ? AND tenant_id = ?';
-    const [users] = await req.db.execute<RowDataPacket[]>(checkQuery, [
+    const [users]: any = await req.db.execute(checkQuery, [
       userId,
       req.user.tenant,
     ]);
@@ -606,7 +605,7 @@ export const revokePermissionFromUser: RequestHandler = async (req: any, res: an
       WHERE up.user_id = ? AND up.permission_id = ? AND u.tenant_id = ?
     `;
 
-    const [result] = await req.db.execute<any>(deleteQuery, [
+    const [result]: any = await req.db.execute(deleteQuery, [
       userId,
       permissionId,
       req.user.tenant,
@@ -639,7 +638,7 @@ export const getUserEffectivePermissions: RequestHandler = async (req: any, res:
       ORDER BY page_name, action_name
     `;
 
-    const [permissions] = await req.db.execute<RowDataPacket[]>(query, [userId]);
+    const [permissions]: any = await req.db.execute(query, [userId]);
 
     // Agrupar por página
     const grouped: Record<string, any> = {};

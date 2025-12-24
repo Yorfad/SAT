@@ -1,21 +1,12 @@
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import type { ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../lib/api';
+import type { Workspace } from '../types/workspace.types';
+
+export type { Workspace };
 
 export const CONSOLIDATED_WORKSPACE = 'all';
-
-export interface Workspace {
-  id: number;
-  name: string;
-  slug: string;
-  description: string | null;
-  color: string;
-  icon: string;
-  is_active: boolean;
-  is_default: boolean;
-  role_in_workspace: 'owner' | 'admin' | 'member' | 'viewer';
-  is_primary: boolean;
-}
 
 interface WorkspaceContextType {
   workspaces: Workspace[];

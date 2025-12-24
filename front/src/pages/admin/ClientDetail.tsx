@@ -264,20 +264,6 @@ export default function ClientDetail(){
     }
   });
 
-  // Eliminar infracción
-  const deleteInfractionMutation = useMutation({
-    mutationFn: async (infractionId: number) => {
-      return await api.delete(`/infractions/${infractionId}`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["client-infractions", id] });
-      queryClient.invalidateQueries({ queryKey: ["client-detail", id] });
-    },
-    onError: (err: any) => {
-      alert(err?.response?.data?.message || "Error al eliminar infracción");
-    }
-  });
-
   const handleDeactivate = () => {
     if (deactivationReason.trim().length < 5) {
       setError("El motivo debe tener al menos 5 caracteres");
