@@ -20,7 +20,8 @@ import {
   approveTask,
   rejectTask,
   requestService,
-  getAvailableServices
+  getAvailableServices,
+  resetClientPassword
 } from "../controllers/client.controller";
 
 
@@ -75,6 +76,12 @@ router.post("/:id/services/:serviceId/deactivate", requireRoles("admin"), valida
 }) })), deactivateClientService);
 
 router.post("/:id/services/:serviceId/activate", requireRoles("admin"), activateClientService);
+
+// Restablecer contraseña de cliente
+router.post("/:id/reset-password", requireRoles("admin", "superadmin"), validate(z.object({ body: z.object({
+  newPassword: z.string().min(6, "La contraseña debe tener al menos 6 caracteres").optional(),
+  generateRandom: z.boolean().optional()
+}) })), resetClientPassword);
 
 
 export default router;

@@ -9,7 +9,27 @@ interface User {
   role: 'admin' | 'employee';
   is_active: boolean;
   created_at: string;
-  clients_count: number;
+}
+
+interface Role {
+  id: number;
+  role_key: string;
+  role_name: string;
+  description: string | null;
+  is_system_role: boolean;
+}
+
+interface UserRole {
+  id: number;
+  role_key: string;
+  role_name: string;
+  description: string | null;
+  is_system_role: boolean;
+  granted_at: string;
+  expires_at: string | null;
+  is_active: boolean;
+  notes: string | null;
+  granted_by_name: string | null;
 }
 
 
@@ -17,8 +37,10 @@ export default function UsersPage() {
   const queryClient = useQueryClient();
   const [showModal, setShowModal] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [showRolesModal, setShowRolesModal] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+  const [selectedUserName, setSelectedUserName] = useState<string>('');
   const [filterRole, setFilterRole] = useState<string>('');
   const [filterActive, setFilterActive] = useState<string>('');
   const [search, setSearch] = useState('');
@@ -45,6 +67,29 @@ export default function UsersPage() {
     }
   });
 
+  // Cargar todos los roles disponibles
+  const { data: allRolesData } = useQuery({
+    queryKey: ['roles-list'],
+    queryFn: async () => {
+      const res = await api.get('/roles-permissions/roles?include_stats=false');
+      return res.data as { roles: Role[] };
+    }
+  });
+
+  const allRoles = allRolesData?.roles || [];
+
+  // Cargar roles del usuario seleccionado
+  const { data: userRolesData, refetch: refetchUserRoles } = useQuery({
+    queryKey: ['user-roles', selectedUserId],
+    queryFn: async () => {
+      if (!selectedUserId) return { roles: [] };
+      const res = await api.get(`/roles-permissions/users/${selectedUserId}/roles`);
+      return res.data as { roles: UserRole[] };
+    },
+    enabled: !!selectedUserId && showRolesModal,
+  });
+
+  const userRoles = userRolesData?.roles || [];
 
   // Crear usuario
   const createMutation = useMutation({
@@ -100,6 +145,26 @@ export default function UsersPage() {
     }
   });
 
+  // Asignar rol a usuario
+  const assignRoleMutation = useMutation({
+    mutationFn: async ({ userId, roleId }: { userId: number; roleId: number }) => {
+      return api.post(`/roles-permissions/users/${userId}/roles`, { role_id: roleId });
+    },
+    onSuccess: () => {
+      refetchUserRoles();
+    }
+  });
+
+  // Revocar rol de usuario
+  const revokeRoleMutation = useMutation({
+    mutationFn: async ({ userId, roleId }: { userId: number; roleId: number }) => {
+      return api.delete(`/roles-permissions/users/${userId}/roles/${roleId}`);
+    },
+    onSuccess: () => {
+      refetchUserRoles();
+    }
+  });
+
   const handleDelete = (user: User) => {
     if (confirm(`¿Estás seguro de eliminar a ${user.full_name}? Esta acción no se puede deshacer.`)) {
       deleteMutation.mutate(user.id);
@@ -129,10 +194,22 @@ export default function UsersPage() {
     setShowPasswordModal(true);
   };
 
+  const openRolesModal = (user: User) => {
+    setSelectedUserId(user.id);
+    setSelectedUserName(user.full_name);
+    setShowRolesModal(true);
+  };
+
   const closeModal = () => {
     setShowModal(false);
     setEditingUser(null);
     setForm({ email: '', password: '', full_name: '', role: 'employee' });
+  };
+
+  const closeRolesModal = () => {
+    setShowRolesModal(false);
+    setSelectedUserId(null);
+    setSelectedUserName('');
   };
 
   const handleSubmit = () => {
@@ -158,6 +235,17 @@ export default function UsersPage() {
       return;
     }
     changePasswordMutation.mutate({ id: selectedUserId, password: newPassword });
+  };
+
+  const handleToggleRole = (roleId: number) => {
+    if (!selectedUserId) return;
+
+    const hasRole = userRoles.some(r => r.id === roleId);
+    if (hasRole) {
+      revokeRoleMutation.mutate({ userId: selectedUserId, roleId });
+    } else {
+      assignRoleMutation.mutate({ userId: selectedUserId, roleId });
+    }
   };
 
   if (isLoading) {
@@ -221,8 +309,7 @@ export default function UsersPage() {
           <thead className="bg-slate-800">
             <tr>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">Usuario</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">Rol</th>
-              <th className="px-4 py-3 text-center text-xs font-medium text-slate-400 uppercase">Clientes</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">Rol Base</th>
               <th className="px-4 py-3 text-center text-xs font-medium text-slate-400 uppercase">Estado</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">Acciones</th>
             </tr>
@@ -246,9 +333,6 @@ export default function UsersPage() {
                   </span>
                 </td>
                 <td className="px-4 py-3 text-center">
-                  <span className="text-slate-300">{user.clients_count || 0}</span>
-                </td>
-                <td className="px-4 py-3 text-center">
                   <button
                     onClick={() => toggleStatusMutation.mutate({
                       id: user.id,
@@ -270,6 +354,12 @@ export default function UsersPage() {
                       className="text-sm text-blue-400 hover:text-blue-300"
                     >
                       Editar
+                    </button>
+                    <button
+                      onClick={() => openRolesModal(user)}
+                      className="text-sm text-purple-400 hover:text-purple-300"
+                    >
+                      Roles
                     </button>
                     <button
                       onClick={() => openPasswordModal(user.id)}
@@ -350,7 +440,7 @@ export default function UsersPage() {
 
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Rol
+                  Rol Base
                 </label>
                 <select
                   value={form.role}
@@ -363,7 +453,7 @@ export default function UsersPage() {
                 <p className="text-xs text-slate-500 mt-1">
                   {form.role === 'admin'
                     ? 'Tendrá acceso total al sistema'
-                    : 'Solo podrá ver y trabajar con clientes asignados'}
+                    : 'Acceso básico. Usa "Roles" para permisos granulares'}
                 </p>
               </div>
 
@@ -428,6 +518,78 @@ export default function UsersPage() {
                   {changePasswordMutation.isPending ? 'Guardando...' : 'Guardar'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal gestionar roles */}
+      {showRolesModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-lg p-6 w-full max-w-lg">
+            <h2 className="text-xl font-semibold text-white mb-2">
+              Gestionar Roles
+            </h2>
+            <p className="text-slate-400 text-sm mb-4">
+              Usuario: {selectedUserName}
+            </p>
+
+            <div className="space-y-2 max-h-96 overflow-y-auto">
+              {allRoles.length === 0 ? (
+                <p className="text-slate-400 text-center py-4">
+                  No hay roles disponibles. Crea roles en la página de Roles y Permisos.
+                </p>
+              ) : (
+                allRoles.map((role) => {
+                  const hasRole = userRoles.some(r => r.id === role.id);
+                  const isPending = assignRoleMutation.isPending || revokeRoleMutation.isPending;
+
+                  return (
+                    <div
+                      key={role.id}
+                      className={`flex items-center justify-between p-3 rounded-lg border ${
+                        hasRole
+                          ? 'bg-purple-900/20 border-purple-700'
+                          : 'bg-slate-800 border-slate-700'
+                      }`}
+                    >
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-white font-medium">{role.role_name}</span>
+                          {role.is_system_role && (
+                            <span className="px-1.5 py-0.5 bg-purple-900/50 text-purple-300 text-xs rounded">
+                              Sistema
+                            </span>
+                          )}
+                        </div>
+                        {role.description && (
+                          <p className="text-sm text-slate-400 mt-0.5">{role.description}</p>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => handleToggleRole(role.id)}
+                        disabled={isPending}
+                        className={`px-3 py-1.5 text-sm rounded transition-colors ${
+                          hasRole
+                            ? 'bg-red-600/20 text-red-400 hover:bg-red-600/30'
+                            : 'bg-green-600/20 text-green-400 hover:bg-green-600/30'
+                        } disabled:opacity-50`}
+                      >
+                        {hasRole ? 'Quitar' : 'Asignar'}
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="flex justify-end pt-4 mt-4 border-t border-slate-700">
+              <button
+                onClick={closeRolesModal}
+                className="px-4 py-2 bg-slate-800 text-slate-300 rounded-lg hover:bg-slate-700"
+              >
+                Cerrar
+              </button>
             </div>
           </div>
         </div>

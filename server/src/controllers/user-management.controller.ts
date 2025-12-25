@@ -18,8 +18,7 @@ export const listUsers: RequestHandler = async (req: any, res) => {
         u.full_name,
         u.role,
         u.is_active,
-        u.created_at,
-        0 as clients_count
+        u.created_at
       FROM users u
       WHERE u.role IN ('admin', 'employee')
         AND u.role != 'superadmin'

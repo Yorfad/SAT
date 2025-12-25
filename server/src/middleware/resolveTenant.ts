@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { getPoolForTenantSlug } from "../config/database";
 import { env } from "../config/env";
+import { PermissionService } from "../services/permission.service";
 
 
 function subdomain(host: string) {
@@ -30,6 +31,7 @@ declare global {
       db?: ReturnType<typeof getPoolForTenantSlug>;
       tenantSlug?: string;
       tenantSettings?: { branding: any; features: string[] };
+      permissionService?: PermissionService;
     }
   }
 }
@@ -45,8 +47,10 @@ export function resolveTenant(req: Request, res: Response, next: NextFunction) {
   if (!slug) return res.status(400).json({ message: "Falta tenant (X-Tenant o subdominio)" });
 
   try {
-    req.db = getPoolForTenantSlug(slug);
+    const db = getPoolForTenantSlug(slug);
+    req.db = db;
     req.tenantSlug = slug;
+    req.permissionService = new PermissionService(db);
     next();
   } catch (e: any) {
     res.status(e.statusCode || 500).json({ message: e.message || "Error tenant" });

@@ -1,7 +1,18 @@
 import { Request, Response } from "express";
+import bcrypt from "bcryptjs";
 import { encrypt } from "../utils/encryption";
 import { WorkspaceService } from "../services/workspace.service";
 import { buildWorkspaceFilter } from "../middleware/resolveWorkspace";
+
+// Función para generar contraseña aleatoria segura
+function generateSecurePassword(length: number = 8): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  let password = '';
+  for (let i = 0; i < length; i++) {
+    password += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return password;
+}
 
 export async function listClients(req: Request, res: Response) {
   const isConsolidated = req.isConsolidatedView;
@@ -565,5 +576,73 @@ export async function getAvailableServices(req: Request, res: Response) {
   } catch (error: any) {
     console.error('Error getting available services:', error);
     res.status(500).json({ message: 'Error al obtener servicios', error: error.message });
+  }
+}
+
+/**
+ * POST /clients/:id/reset-password
+ * Genera una contraseña temporal que el cliente DEBE cambiar al iniciar sesión
+ * Solo accesible por admin/superadmin
+ */
+export async function resetClientPassword(req: Request, res: Response) {
+  try {
+    const { id } = req.params;
+    const adminUserId = (req as any).user?.sub;
+
+    // Verificar que el cliente existe y es role='client'
+    const [[client]]: any = await req.db!.query(
+      'SELECT id, full_name, nit, email FROM users WHERE id = ? AND role = "client"',
+      [id]
+    );
+
+    if (!client) {
+      return res.status(404).json({ message: 'Cliente no encontrado' });
+    }
+
+    // SIEMPRE generar contraseña temporal aleatoria
+    const temporaryPassword = generateSecurePassword(8);
+
+    // Hashear la contraseña temporal
+    const passwordHash = await bcrypt.hash(temporaryPassword, 10);
+
+    // Actualizar contraseña y marcar como TEMPORAL (debe cambiarla)
+    await req.db!.query(
+      `UPDATE users SET
+        password_hash = ?,
+        must_change_password = TRUE,
+        password_changed_at = NULL
+       WHERE id = ?`,
+      [passwordHash, id]
+    );
+
+    // Registrar en historial
+    await req.db!.query(
+      `INSERT INTO password_history (user_id, action, performed_by, ip_address)
+       VALUES (?, 'reset_by_admin', ?, ?)`,
+      [id, adminUserId, req.ip]
+    );
+
+    console.log(`[PASSWORD-RESET] Contraseña temporal generada para ${client.full_name} (ID: ${id}) por admin ${adminUserId}`);
+
+    res.json({
+      success: true,
+      message: 'Contraseña temporal generada',
+      client: {
+        id: client.id,
+        full_name: client.full_name,
+        nit: client.nit,
+        email: client.email
+      },
+      temporaryPassword: temporaryPassword,
+      instructions: [
+        `1. Comunique esta contraseña temporal al cliente: ${temporaryPassword}`,
+        '2. El cliente deberá cambiarla obligatoriamente al iniciar sesión',
+        '3. Esta contraseña no se mostrará nuevamente',
+        '4. El cliente también puede restablecer desde "Olvidé mi contraseña" si tiene email'
+      ]
+    });
+  } catch (error: any) {
+    console.error('Error resetting client password:', error);
+    res.status(500).json({ message: 'Error al restablecer contraseña', error: error.message });
   }
 }

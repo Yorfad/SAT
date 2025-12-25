@@ -1,6 +1,16 @@
 import { Router } from "express";
 import { resolveTenant } from "../middleware/resolveTenant";
-import { register, login, clientLogin, clientRegister } from "../controllers/auth.controller";
+import { authenticateToken } from "../middleware/auth";
+import {
+  register,
+  login,
+  clientLogin,
+  clientRegister,
+  changePassword,
+  forgotPassword,
+  resetPasswordWithToken,
+  verifyResetToken
+} from "../controllers/auth.controller";
 import { validate } from "../middleware/validate";
 import { z } from "zod";
 
@@ -47,6 +57,38 @@ router.post("/login", validate(LoginDTO), login);
 // Endpoints para clientes móviles (login con NIT)
 router.post("/client/login", validate(ClientLoginDTO), clientLogin);
 router.post("/client/register", validate(ClientRegisterDTO), clientRegister);
+
+// ==========================================
+// ENDPOINTS DE GESTIÓN DE CONTRASEÑAS
+// ==========================================
+
+// Cambiar contraseña (requiere autenticación)
+const ChangePasswordDTO = z.object({ body: z.object({
+  currentPassword: z.string().optional(), // Opcional si es cambio obligatorio
+  newPassword: z.string().min(6, "La contraseña debe tener al menos 6 caracteres"),
+  confirmPassword: z.string().min(6)
+})});
+router.post("/change-password", authenticateToken, validate(ChangePasswordDTO), changePassword);
+
+// Olvidé mi contraseña (público)
+const ForgotPasswordDTO = z.object({ body: z.object({
+  email: z.string().email().optional(),
+  nit: z.string().min(4).optional()
+}).refine(data => data.email || data.nit, {
+  message: "Debe proporcionar email o NIT"
+})});
+router.post("/forgot-password", validate(ForgotPasswordDTO), forgotPassword);
+
+// Restablecer con token (público)
+const ResetWithTokenDTO = z.object({ body: z.object({
+  token: z.string().min(1, "Token requerido"),
+  newPassword: z.string().min(6, "La contraseña debe tener al menos 6 caracteres"),
+  confirmPassword: z.string().min(6)
+})});
+router.post("/reset-password-with-token", validate(ResetWithTokenDTO), resetPasswordWithToken);
+
+// Verificar token (público)
+router.get("/verify-reset-token", verifyResetToken);
 
 
 export default router;

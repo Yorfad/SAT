@@ -30,6 +30,7 @@ import rolesPermissionsRoutes from "./routes/roles-permissions.routes";
 import workspaceRoutes from "./routes/workspace.routes";
 import invitationsRoutes from "./routes/invitations.routes";
 import clientFieldsRoutes from "./routes/client-fields.routes";
+import bulkAssignmentRoutes from "./routes/bulk-assignment.routes";
 
 
 import { resolveTenant } from "./middleware/resolveTenant";
@@ -111,6 +112,7 @@ app.use("/api/roles-permissions", rolesPermissionsRoutes);
 app.use("/api/workspaces", workspaceRoutes);
 app.use("/api/invitations", invitationsRoutes);
 app.use("/api/client-fields", clientFieldsRoutes);
+app.use("/api/bulk-assignment", bulkAssignmentRoutes);
 
 
 app.use(errorHandler);

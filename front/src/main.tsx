@@ -11,6 +11,8 @@ import BoardPage from './pages/admin/BoardPage';
 import LoginPage from './pages/auth/LoginPage';
 import ClientLoginPage from './pages/auth/ClientLoginPage';
 import ClientRegisterPage from './pages/auth/ClientRegisterPage';
+import ForgotPasswordPage from './pages/auth/ForgotPasswordPage';
+import ResetPasswordPage from './pages/auth/ResetPasswordPage';
 import ClientsPage from './pages/admin/ClientsPage';
 import TasksPage from './pages/admin/TasksPage';
 import TaskDetailPage from './pages/admin/TaskDetailPage';
@@ -26,6 +28,7 @@ import WorkspacesPage from './pages/admin/WorkspacesPage';
 import InvitationsPage from './pages/admin/InvitationsPage';
 import ClientFieldsPage from './pages/admin/ClientFieldsPage';
 import UsersPage from './pages/admin/UsersPage';
+import RolesPage from './pages/admin/RolesPage';
 
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { WorkspaceProvider } from './context/WorkspaceContext';
@@ -51,6 +54,9 @@ const router = createBrowserRouter([
   { path: '/login', element: isNativePlatform ? <ClientLoginPage /> : <LoginPage /> },
   { path: '/client/login', element: <ClientLoginPage /> },
   { path: '/client/register', element: <ClientRegisterPage /> },
+  // Páginas de recuperación de contraseña (públicas)
+  { path: '/forgot-password', element: <ForgotPasswordPage /> },
+  { path: '/reset-password', element: <ResetPasswordPage /> },
   {
     path: '/',
     element: (
@@ -163,6 +169,14 @@ const router = createBrowserRouter([
         element: (
           <Protected roles={['admin']}>
             <UsersPage />
+          </Protected>
+        ),
+      },
+      {
+        path: 'admin/roles',
+        element: (
+          <Protected roles={['admin']}>
+            <RolesPage />
           </Protected>
         ),
       },

@@ -2,11 +2,13 @@ import { Router } from 'express';
 import * as controller from '../controllers/roles-permissions.controller';
 import { requirePermission } from '../middleware/permissions';
 import { authenticateToken } from '../middleware/auth';
+import { loadWorkspaceId } from '../middleware/resolveWorkspace';
 
 const router = Router();
 
-// Todas las rutas requieren autenticación
+// Todas las rutas requieren autenticación y contexto de workspace
 router.use(authenticateToken);
+router.use(loadWorkspaceId);
 
   // ========================================
   // GESTIÓN DE ROLES
@@ -89,6 +91,28 @@ router.use(authenticateToken);
     controller.revokePermissionsFromRole
   );
 
+  /**
+   * Obtiene la matriz de permisos de un rol
+   * GET /api/roles-permissions/roles/:id/matrix
+   * Requiere: roles:view
+   */
+  router.get(
+    '/roles/:id/matrix',
+    requirePermission('roles:view', { auditAction: 'roles:view_matrix' }),
+    controller.getRolePermissionMatrix
+  );
+
+  /**
+   * Actualiza la matriz de permisos de un rol
+   * PUT /api/roles-permissions/roles/:id/matrix
+   * Requiere: roles:manage
+   */
+  router.put(
+    '/roles/:id/matrix',
+    requirePermission('roles:manage', { auditAction: 'roles:update_matrix' }),
+    controller.updateRolePermissionMatrix
+  );
+
   // ========================================
   // GESTIÓN DE PERMISOS
   // ========================================
@@ -117,6 +141,17 @@ router.use(authenticateToken);
     '/users/:userId/roles',
     requirePermission('users:manage', { auditAction: 'users:assign_role' }),
     controller.assignRoleToUser
+  );
+
+  /**
+   * Obtiene los roles asignados a un usuario
+   * GET /api/roles-permissions/users/:userId/roles
+   * Requiere: users:view
+   */
+  router.get(
+    '/users/:userId/roles',
+    requirePermission('users:view', { auditAction: 'users:view_roles' }),
+    controller.getUserRoles
   );
 
   /**

@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../../lib/api";
 import { money } from "../../utils/format";
+import { useWorkspace } from "../../context/WorkspaceContext";
 
 type TabType = "payments" | "expenses" | "infractions";
 
@@ -46,10 +47,87 @@ type Infraction = {
 
 export default function FinancialManagementPage() {
   const [activeTab, setActiveTab] = useState<TabType>("payments");
+  const [showAllWorkspaces, setShowAllWorkspaces] = useState(false);
+  const { workspaces, currentWorkspace, setConsolidatedView, switchWorkspace } = useWorkspace();
+  const queryClient = useQueryClient();
+
+  // Ref para guardar el workspace al que volver y si activamos consolidated
+  const previousWorkspaceRef = useRef(currentWorkspace);
+  const activatedConsolidatedRef = useRef(false);
+
+  // Guardar el workspace actual cuando se monta el componente
+  useEffect(() => {
+    if (currentWorkspace) {
+      previousWorkspaceRef.current = currentWorkspace;
+    }
+  }, [currentWorkspace]);
+
+  // Al salir de la página, restaurar al workspace anterior si activamos consolidated
+  useEffect(() => {
+    return () => {
+      if (activatedConsolidatedRef.current) {
+        // Desactivar vista consolidada
+        setConsolidatedView(false);
+        // Restaurar workspace anterior si existe
+        if (previousWorkspaceRef.current) {
+          switchWorkspace(previousWorkspaceRef.current);
+        }
+      }
+    };
+  }, [setConsolidatedView, switchWorkspace]);
+
+  const handleToggleAllWorkspaces = () => {
+    const newValue = !showAllWorkspaces;
+    setShowAllWorkspaces(newValue);
+    setConsolidatedView(newValue);
+    // Trackear si activamos consolidated para hacer cleanup al salir
+    activatedConsolidatedRef.current = newValue;
+    // Invalidar queries para recargar datos
+    queryClient.invalidateQueries({ queryKey: ["pending-payments"] });
+    queryClient.invalidateQueries({ queryKey: ["expenses"] });
+    queryClient.invalidateQueries({ queryKey: ["infractions"] });
+  };
 
   return (
     <div className="p-6 space-y-6">
-      <h1 className="text-2xl font-semibold text-white">Gestión Financiera</h1>
+      {/* Header con título y toggle */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-white">Gestión Financiera</h1>
+          {showAllWorkspaces && (
+            <p className="text-sm text-purple-400 mt-1 flex items-center gap-2">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Mostrando datos de todos los workspaces
+            </p>
+          )}
+        </div>
+
+        {/* Toggle para ver todos los workspaces */}
+        {workspaces.length > 1 && (
+          <button
+            onClick={handleToggleAllWorkspaces}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all ${
+              showAllWorkspaces
+                ? 'bg-purple-900/30 border-purple-600 text-purple-300'
+                : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700 hover:text-slate-300'
+            }`}
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span className="text-sm font-medium">
+              {showAllWorkspaces ? 'Todos los workspaces' : 'Ver todos'}
+            </span>
+            {showAllWorkspaces && (
+              <svg className="w-4 h-4 text-purple-400" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+              </svg>
+            )}
+          </button>
+        )}
+      </div>
 
       {/* Tabs */}
       <div className="bg-slate-900 rounded-xl shadow-lg">

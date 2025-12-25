@@ -1,10 +1,26 @@
 import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import jwt, { Secret, SignOptions } from "jsonwebtoken";
 import { env } from "../config/env";
 import { WorkspaceService } from "../services/workspace.service";
 import { ClientService } from "../services/client.service";
 import { getAllTenantPools } from "../config/database";
+
+// Función para generar contraseña aleatoria segura
+function generateSecurePassword(length: number = 8): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  let password = '';
+  for (let i = 0; i < length; i++) {
+    password += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return password;
+}
+
+// Función para generar token de reset
+function generateResetToken(): string {
+  return crypto.randomBytes(32).toString('hex');
+}
 
 
 export async function register(req: Request, res: Response) {
@@ -102,6 +118,7 @@ res.json({
 
 /**
  * Login para clientes móviles usando NIT + contraseña
+ * Incluye verificación de contraseña temporal que debe cambiarse
  */
 export async function clientLogin(req: Request, res: Response) {
   const db = req.db!;
@@ -111,6 +128,7 @@ export async function clientLogin(req: Request, res: Response) {
   const [rows] = await db.query(
     `SELECT u.id, u.email, u.password_hash, u.full_name, u.role, u.nit, u.is_active,
             u.deactivation_reason, u.deactivated_at, u.phone_number,
+            u.must_change_password, u.password_changed_at,
             cp.overall_rating
      FROM users u
      LEFT JOIN clients_profiles cp ON cp.user_id = u.id
@@ -158,6 +176,9 @@ export async function clientLogin(req: Request, res: Response) {
     opts
   );
 
+  // Verificar si debe cambiar contraseña
+  const mustChangePassword = u.must_change_password === 1 || u.must_change_password === true;
+
   res.json({
     token,
     user: {
@@ -171,7 +192,14 @@ export async function clientLogin(req: Request, res: Response) {
       overall_rating: u.overall_rating,
       workspace: primaryWorkspace
     },
-    tenant: req.tenantSlug
+    tenant: req.tenantSlug,
+    // Indicadores de contraseña
+    mustChangePassword: mustChangePassword,
+    passwordNeverChanged: !u.password_changed_at,
+    // Mensaje amigable si debe cambiar
+    ...(mustChangePassword && {
+      passwordMessage: "Tu contraseña es temporal. Por seguridad, debes crear una nueva contraseña personal."
+    })
   });
 }
 
@@ -445,4 +473,290 @@ export async function mobileClientLogin(req: Request, res: Response) {
 
   // No encontrado en ningún tenant
   return res.status(401).json({ message: "NIT o contraseña incorrectos" });
+}
+
+
+/**
+ * POST /auth/change-password
+ * Permite al cliente autenticado cambiar su contraseña
+ * Usado cuando must_change_password = true o cambio voluntario
+ */
+export async function changePassword(req: Request, res: Response) {
+  const db = req.db!;
+  const userId = (req as any).user?.sub;
+  const { currentPassword, newPassword, confirmPassword } = req.body;
+
+  if (!userId) {
+    return res.status(401).json({ message: "No autenticado" });
+  }
+
+  // Validaciones
+  if (!newPassword || newPassword.length < 6) {
+    return res.status(400).json({
+      message: "La nueva contraseña debe tener al menos 6 caracteres"
+    });
+  }
+
+  if (newPassword !== confirmPassword) {
+    return res.status(400).json({
+      message: "Las contraseñas no coinciden"
+    });
+  }
+
+  // Obtener usuario
+  const [[user]]: any = await db.query(
+    'SELECT id, nit, password_hash, must_change_password FROM users WHERE id = ?',
+    [userId]
+  );
+
+  if (!user) {
+    return res.status(404).json({ message: "Usuario no encontrado" });
+  }
+
+  // Si NO es cambio obligatorio, verificar contraseña actual
+  if (!user.must_change_password && currentPassword) {
+    const validPassword = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!validPassword) {
+      return res.status(400).json({ message: "La contraseña actual es incorrecta" });
+    }
+  }
+
+  // Validar que la nueva contraseña no sea igual al NIT
+  if (newPassword === user.nit) {
+    return res.status(400).json({
+      message: "Por seguridad, tu contraseña no puede ser igual a tu NIT"
+    });
+  }
+
+  // Hashear nueva contraseña
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+
+  // Actualizar contraseña y quitar flag de temporal
+  await db.query(
+    `UPDATE users SET
+      password_hash = ?,
+      must_change_password = FALSE,
+      password_changed_at = NOW()
+     WHERE id = ?`,
+    [passwordHash, userId]
+  );
+
+  // Registrar en historial
+  const action = user.must_change_password ? 'first_login_change' : 'changed_by_user';
+  await db.query(
+    `INSERT INTO password_history (user_id, action, ip_address, user_agent)
+     VALUES (?, ?, ?, ?)`,
+    [userId, action, req.ip, req.headers['user-agent']]
+  );
+
+  console.log(`[PASSWORD-CHANGE] Usuario ${userId} cambió su contraseña`);
+
+  res.json({
+    success: true,
+    message: "¡Contraseña actualizada exitosamente!",
+    tips: [
+      "Recuerda tu nueva contraseña",
+      "No la compartas con nadie",
+      "Si la olvidas, puedes restablecerla desde 'Olvidé mi contraseña'"
+    ]
+  });
+}
+
+
+/**
+ * POST /auth/forgot-password
+ * Solicita restablecimiento de contraseña por email
+ * NO requiere autenticación
+ */
+export async function forgotPassword(req: Request, res: Response) {
+  const db = req.db!;
+  const { email, nit } = req.body;
+
+  // Buscar usuario por email O nit (para clientes)
+  let query = 'SELECT id, email, full_name, nit FROM users WHERE ';
+  let params: any[] = [];
+
+  if (email) {
+    query += 'email = ?';
+    params.push(email);
+  } else if (nit) {
+    query += 'nit = ? AND role = "client"';
+    params.push(nit);
+  } else {
+    return res.status(400).json({
+      message: "Ingresa tu correo electrónico o NIT"
+    });
+  }
+
+  const [[user]]: any = await db.query(query, params);
+
+  // SIEMPRE responder igual (seguridad: no revelar si existe)
+  const successMessage = {
+    success: true,
+    message: "Si el correo/NIT está registrado, recibirás instrucciones para restablecer tu contraseña.",
+    hint: "Revisa tu bandeja de entrada y spam"
+  };
+
+  if (!user || !user.email) {
+    // Usuario no encontrado o sin email, pero no revelamos esto
+    console.log(`[FORGOT-PASSWORD] Intento con ${email || nit} - no encontrado o sin email`);
+    return res.json(successMessage);
+  }
+
+  // Generar token de reset
+  const resetToken = generateResetToken();
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 horas
+
+  // Guardar token en BD
+  await db.query(
+    `UPDATE users SET
+      password_reset_token = ?,
+      password_reset_expires = ?
+     WHERE id = ?`,
+    [resetToken, expiresAt, user.id]
+  );
+
+  // TODO: Enviar email con el link de reset
+  // Por ahora, logueamos el token para desarrollo
+  const resetUrl = `${req.headers.origin || 'https://app.example.com'}/reset-password?token=${resetToken}`;
+  console.log(`[FORGOT-PASSWORD] Token generado para ${user.email}:`);
+  console.log(`  Token: ${resetToken}`);
+  console.log(`  URL: ${resetUrl}`);
+  console.log(`  Expira: ${expiresAt}`);
+
+  // En producción, aquí iría el envío de email:
+  // await sendResetPasswordEmail(user.email, user.full_name, resetUrl);
+
+  res.json(successMessage);
+}
+
+
+/**
+ * POST /auth/reset-password-with-token
+ * Restablece la contraseña usando el token del email
+ * NO requiere autenticación
+ */
+export async function resetPasswordWithToken(req: Request, res: Response) {
+  const db = req.db!;
+  const { token, newPassword, confirmPassword } = req.body;
+
+  if (!token) {
+    return res.status(400).json({ message: "Token de restablecimiento requerido" });
+  }
+
+  if (!newPassword || newPassword.length < 6) {
+    return res.status(400).json({
+      message: "La contraseña debe tener al menos 6 caracteres"
+    });
+  }
+
+  if (newPassword !== confirmPassword) {
+    return res.status(400).json({ message: "Las contraseñas no coinciden" });
+  }
+
+  // Buscar usuario con token válido
+  const [[user]]: any = await db.query(
+    `SELECT id, nit, password_reset_expires
+     FROM users
+     WHERE password_reset_token = ?`,
+    [token]
+  );
+
+  if (!user) {
+    return res.status(400).json({
+      message: "El enlace de restablecimiento no es válido",
+      expired: true
+    });
+  }
+
+  // Verificar que no haya expirado
+  if (new Date() > new Date(user.password_reset_expires)) {
+    // Limpiar token expirado
+    await db.query(
+      'UPDATE users SET password_reset_token = NULL, password_reset_expires = NULL WHERE id = ?',
+      [user.id]
+    );
+    return res.status(400).json({
+      message: "El enlace de restablecimiento ha expirado. Solicita uno nuevo.",
+      expired: true
+    });
+  }
+
+  // Validar que no sea igual al NIT
+  if (newPassword === user.nit) {
+    return res.status(400).json({
+      message: "Por seguridad, tu contraseña no puede ser igual a tu NIT"
+    });
+  }
+
+  // Hashear nueva contraseña
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+
+  // Actualizar contraseña y limpiar token
+  await db.query(
+    `UPDATE users SET
+      password_hash = ?,
+      password_reset_token = NULL,
+      password_reset_expires = NULL,
+      must_change_password = FALSE,
+      password_changed_at = NOW()
+     WHERE id = ?`,
+    [passwordHash, user.id]
+  );
+
+  // Registrar en historial
+  await db.query(
+    `INSERT INTO password_history (user_id, action, ip_address, user_agent)
+     VALUES (?, 'reset_by_email', ?, ?)`,
+    [user.id, req.ip, req.headers['user-agent']]
+  );
+
+  console.log(`[PASSWORD-RESET-EMAIL] Usuario ${user.id} restableció su contraseña por email`);
+
+  res.json({
+    success: true,
+    message: "¡Contraseña restablecida exitosamente!",
+    nextStep: "Ahora puedes iniciar sesión con tu nueva contraseña"
+  });
+}
+
+
+/**
+ * GET /auth/verify-reset-token
+ * Verifica si un token de reset es válido (antes de mostrar el form)
+ */
+export async function verifyResetToken(req: Request, res: Response) {
+  const db = req.db!;
+  const { token } = req.query;
+
+  if (!token) {
+    return res.status(400).json({ valid: false, message: "Token requerido" });
+  }
+
+  const [[user]]: any = await db.query(
+    `SELECT id, full_name, password_reset_expires
+     FROM users
+     WHERE password_reset_token = ?`,
+    [token]
+  );
+
+  if (!user) {
+    return res.json({
+      valid: false,
+      message: "El enlace no es válido o ya fue utilizado"
+    });
+  }
+
+  if (new Date() > new Date(user.password_reset_expires)) {
+    return res.json({
+      valid: false,
+      message: "El enlace ha expirado. Solicita uno nuevo.",
+      expired: true
+    });
+  }
+
+  res.json({
+    valid: true,
+    userName: user.full_name
+  });
 }
