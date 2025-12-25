@@ -45,11 +45,11 @@ CREATE TABLE IF NOT EXISTS password_history (
 -- ============================================
 
 -- Agregar configuración de email en tenant_settings si no existe
-INSERT IGNORE INTO tenant_settings (setting_key, value, description) VALUES
+INSERT IGNORE INTO tenant_settings (setting_key, setting_value, description) VALUES
   ('smtp_host', '', 'Host del servidor SMTP'),
   ('smtp_port', '587', 'Puerto del servidor SMTP'),
   ('smtp_user', '', 'Usuario SMTP'),
-  ('smtp_password', '', 'Contraseña SMTP (encriptada)'),
+  ('smtp_password', '', 'Contraseña SMTP'),
   ('smtp_from_email', '', 'Email del remitente'),
   ('smtp_from_name', '', 'Nombre del remitente'),
   ('password_reset_expiry_hours', '24', 'Horas de validez del token de reset');
