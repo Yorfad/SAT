@@ -81,6 +81,12 @@ export async function upsertClientProfile(req: Request, res: Response) {
   const { contract_number = null, sat_password, overall_rating = null, notes = null } = req.body;
   const workspaceId = req.workspaceId;
 
+  // Verificar que el usuario existe
+  const [[user]]: any = await req.db!.query(`SELECT id FROM users WHERE id=? AND role='client'`, [id]);
+  if (!user) {
+    return res.status(404).json({ message: 'Cliente no encontrado' });
+  }
+
   const [[exists]]: any = await req.db!.query(`SELECT user_id FROM clients_profiles WHERE user_id=?`, [id]);
   const satEnc = sat_password ? encrypt(sat_password) : null;
 

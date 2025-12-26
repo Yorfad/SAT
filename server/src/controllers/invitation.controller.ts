@@ -332,7 +332,7 @@ export async function validateInvitationCode(req: Request, res: Response) {
 /**
  * POST /api/public/validate-code
  * Valida un código de 4 dígitos buscando en todos los tenants
- * Busca por workspace.registration_code
+ * Busca por invitation_codes.code
  * NO requiere header X-Tenant
  */
 export async function publicValidateCode(req: Request, res: Response) {
@@ -350,16 +350,22 @@ export async function publicValidateCode(req: Request, res: Response) {
 
     for (const { slug, pool } of tenantPools) {
       try {
-        // Buscar por workspace.registration_code
+        // Buscar en invitation_codes
         const [rows]: any = await pool.query(
-          `SELECT id, name, registration_code, auto_approve_registration
-           FROM workspaces
-           WHERE registration_code = ? AND is_active = TRUE`,
+          `SELECT ic.id, ic.code, ic.auto_approve, ic.workspace_id,
+                  ic.required_fields, ic.optional_fields, ic.default_services,
+                  w.name as workspace_name
+           FROM invitation_codes ic
+           LEFT JOIN workspaces w ON w.id = ic.workspace_id
+           WHERE ic.code = ?
+             AND ic.is_active = TRUE
+             AND (ic.expires_at IS NULL OR ic.expires_at > NOW())
+             AND (ic.max_uses IS NULL OR ic.uses_count < ic.max_uses)`,
           [code]
         );
 
         if (rows && rows.length > 0) {
-          const workspace = rows[0];
+          const invitation = rows[0];
 
           // Obtener nombre del tenant
           const [tenantInfo]: any = await pool.query(
@@ -372,9 +378,12 @@ export async function publicValidateCode(req: Request, res: Response) {
             valid: true,
             tenant: slug,
             tenantName: tenantName,
-            workspaceId: workspace.id,
-            workspaceName: workspace.name,
-            autoApprove: workspace.auto_approve_registration
+            invitationId: invitation.id,
+            workspaceId: invitation.workspace_id,
+            workspaceName: invitation.workspace_name,
+            autoApprove: invitation.auto_approve,
+            requiredFields: JSON.parse(invitation.required_fields || '["nit", "full_name", "password"]'),
+            optionalFields: JSON.parse(invitation.optional_fields || '["email", "phone_number"]')
           });
         }
       } catch (err) {

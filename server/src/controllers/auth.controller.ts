@@ -67,11 +67,17 @@ const [rows] = await db.query(
 const u = (rows as any[])[0];
 
 // Verificar que el usuario existe
-if (!u) return res.status(401).json({ message: "Credenciales inválidas" });
+if (!u) {
+  console.warn(`[AUTH] Login fallido: email no encontrado - ${email}`);
+  return res.status(400).json({ message: "Credenciales inválidas" });
+}
 
 // Verificar contraseña
 const ok = await bcrypt.compare(password, u.password_hash);
-if (!ok) return res.status(401).json({ message: "Credenciales inválidas" });
+if (!ok) {
+  console.warn(`[AUTH] Login fallido: contraseña incorrecta - ${email}`);
+  return res.status(400).json({ message: "Credenciales inválidas" });
+}
 
 // Verificar si el cliente está desactivado
 if (!u.is_active) {

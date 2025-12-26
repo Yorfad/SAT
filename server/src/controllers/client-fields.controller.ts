@@ -662,6 +662,15 @@ export const createClient: RequestHandler = async (req: any, res: any) => {
 
   const workspaceId = req.workspaceId;
 
+  // Validación de campos requeridos
+  if (!fullName || typeof fullName !== 'string' || fullName.trim() === '') {
+    return res.status(400).json({ error: 'El nombre completo es requerido' });
+  }
+
+  if (!email || typeof email !== 'string' || email.trim() === '') {
+    return res.status(400).json({ error: 'El email es requerido' });
+  }
+
   try {
     // Verificar que el email no exista
     const [[existing]]: any = await req.db.query(
