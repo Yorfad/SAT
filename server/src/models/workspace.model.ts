@@ -12,6 +12,14 @@ export interface Workspace extends RowDataPacket {
   created_by_user_id: number | null;
   created_at: Date;
   updated_at: Date;
+  // Configuración de infracciones
+  max_infractions: number;
+  infraction_color_0_bg: string | null;
+  infraction_color_0_text: string | null;
+  infraction_color_1_bg: string;
+  infraction_color_1_text: string;
+  infraction_color_2_bg: string;
+  infraction_color_2_text: string;
 }
 
 export interface UserWorkspace extends RowDataPacket {
@@ -52,6 +60,14 @@ export interface UpdateWorkspaceDTO {
   color?: string;
   icon?: string;
   is_active?: boolean;
+  // Configuración de infracciones
+  max_infractions?: number;
+  infraction_color_0_bg?: string | null;
+  infraction_color_0_text?: string | null;
+  infraction_color_1_bg?: string;
+  infraction_color_1_text?: string;
+  infraction_color_2_bg?: string;
+  infraction_color_2_text?: string;
 }
 
 export interface AssignUserToWorkspaceDTO {

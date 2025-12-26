@@ -45,7 +45,7 @@ function IndexRedirect() {
     return <Navigate to={isNativePlatform ? "/client/login" : "/login"} replace />;
   }
   if (user.role === 'client') return <Navigate to="/client/dashboard" replace />;
-  // Admin/Employee por defecto a tareas
+  // admin/employee por defecto a tareas
   return <Navigate to="/admin/tasks" replace />;
 }
 

@@ -4,7 +4,7 @@ import api from "../../lib/api";
 import { money } from "../../utils/format";
 import { useWorkspace } from "../../context/WorkspaceContext";
 
-type TabType = "payments" | "expenses" | "infractions";
+type TabType = "payments" | "expenses";
 
 type PendingPayment = {
   id: number;
@@ -29,20 +29,8 @@ type Expense = {
   expense_date: string;
   category: string | null;
   is_active: boolean;
+  is_shared: boolean;
   created_by_name: string;
-};
-
-type Infraction = {
-  id: number;
-  client_user_id: number;
-  client_name: string;
-  infraction_type: "automatic_unpaid" | "manual";
-  reason: string;
-  invoice_year: number | null;
-  invoice_month: number | null;
-  is_active: boolean;
-  created_at: string;
-  created_by_name: string | null;
 };
 
 export default function FinancialManagementPage() {
@@ -85,7 +73,6 @@ export default function FinancialManagementPage() {
     // Invalidar queries para recargar datos
     queryClient.invalidateQueries({ queryKey: ["pending-payments"] });
     queryClient.invalidateQueries({ queryKey: ["expenses"] });
-    queryClient.invalidateQueries({ queryKey: ["infractions"] });
   };
 
   return (
@@ -143,18 +130,12 @@ export default function FinancialManagementPage() {
               onClick={() => setActiveTab("expenses")}
               label="Gastos"
             />
-            <Tab
-              active={activeTab === "infractions"}
-              onClick={() => setActiveTab("infractions")}
-              label="Infracciones"
-            />
           </nav>
         </div>
 
         <div className="p-6">
           {activeTab === "payments" && <PaymentsTab />}
           {activeTab === "expenses" && <ExpensesTab />}
-          {activeTab === "infractions" && <InfractionsTab />}
         </div>
       </div>
     </div>
@@ -377,6 +358,16 @@ function PaymentsTab() {
 // TAB DE GASTOS
 // ============================================================================
 
+type ExpenseCategory = {
+  id: number;
+  name: string;
+  description: string | null;
+  color: string;
+  workspace_id: number | null;
+  workspace_name: string | null;
+  is_active: boolean;
+};
+
 function ExpensesTab() {
   const queryClient = useQueryClient();
   const currentYear = new Date().getFullYear();
@@ -389,6 +380,49 @@ function ExpensesTab() {
   const [amount, setAmount] = useState("");
   const [expenseDate, setExpenseDate] = useState(new Date().toISOString().split("T")[0]);
   const [category, setCategory] = useState("");
+  const [isShared, setIsShared] = useState(false);
+
+  // Modal de categorias
+  const [showCategoriesModal, setShowCategoriesModal] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryColor, setNewCategoryColor] = useState("#6B7280");
+  const [editingCategory, setEditingCategory] = useState<ExpenseCategory | null>(null);
+
+  // Query para categorias
+  const { data: categories = [] } = useQuery({
+    queryKey: ["expense-categories"],
+    queryFn: async () => (await api.get<ExpenseCategory[]>("/expense-categories")).data,
+  });
+
+  const createCategoryMutation = useMutation({
+    mutationFn: async (data: { name: string; color: string; isGlobal?: boolean }) => {
+      await api.post("/expense-categories", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["expense-categories"] });
+      setNewCategoryName("");
+      setNewCategoryColor("#6B7280");
+    },
+  });
+
+  const updateCategoryMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: number; data: any }) => {
+      await api.patch(`/expense-categories/${id}`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["expense-categories"] });
+      setEditingCategory(null);
+    },
+  });
+
+  const deleteCategoryMutation = useMutation({
+    mutationFn: async (id: number) => {
+      await api.delete(`/expense-categories/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["expense-categories"] });
+    },
+  });
 
   const { data: expenses, isLoading } = useQuery({
     queryKey: ["expenses", currentYear, currentMonth],
@@ -416,6 +450,7 @@ function ExpensesTab() {
       setDescription("");
       setAmount("");
       setCategory("");
+      setIsShared(false);
       alert("Gasto registrado correctamente");
     },
   });
@@ -434,6 +469,7 @@ function ExpensesTab() {
       setDescription("");
       setAmount("");
       setCategory("");
+      setIsShared(false);
       alert("Gasto actualizado correctamente");
     },
   });
@@ -476,6 +512,7 @@ function ExpensesTab() {
           description,
           amount: parseFloat(amount),
           category: category || undefined,
+          isShared,
         }
       });
     } else {
@@ -485,6 +522,7 @@ function ExpensesTab() {
         amount: parseFloat(amount),
         expenseDate,
         category: category || undefined,
+        isShared,
       });
     }
   };
@@ -495,6 +533,7 @@ function ExpensesTab() {
     setAmount(expense.amount.toString());
     setCategory(expense.category || "");
     setExpenseType(expense.expense_type);
+    setIsShared(expense.is_shared || false);
     setShowForm(true);
   };
 
@@ -504,6 +543,7 @@ function ExpensesTab() {
     setDescription("");
     setAmount("");
     setCategory("");
+    setIsShared(false);
   };
 
   if (isLoading) return <div className="text-slate-400">Cargando gastos...</div>;
@@ -531,18 +571,30 @@ function ExpensesTab() {
       {/* Botón Agregar */}
       <div className="flex justify-between items-center">
         <h3 className="text-lg font-semibold text-white">Gastos del Mes</h3>
-        <button
-          onClick={() => {
-            if (showForm) {
-              handleCancelEdit();
-            } else {
-              setShowForm(true);
-            }
-          }}
-          className="bg-gradient-to-r from-orange-600 to-amber-600 text-white px-4 py-2 rounded-lg hover:from-orange-700 hover:to-amber-700 font-medium"
-        >
-          {showForm ? "Cancelar" : "+ Agregar Gasto"}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowCategoriesModal(true)}
+            className="bg-slate-700 text-slate-300 px-4 py-2 rounded-lg hover:bg-slate-600 font-medium flex items-center gap-2"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            Categorias
+          </button>
+          <button
+            onClick={() => {
+              if (showForm) {
+                handleCancelEdit();
+              } else {
+                setShowForm(true);
+              }
+            }}
+            className="bg-gradient-to-r from-orange-600 to-amber-600 text-white px-4 py-2 rounded-lg hover:from-orange-700 hover:to-amber-700 font-medium"
+          >
+            {showForm ? "Cancelar" : "+ Agregar Gasto"}
+          </button>
+        </div>
       </div>
 
       {/* Formulario */}
@@ -597,33 +649,39 @@ function ExpensesTab() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-1">Categoría</label>
-              <input
-                type="text"
-                list="expense-categories"
+              <label className="block text-sm font-medium text-slate-300 mb-1">Categoria</label>
+              <select
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
-                placeholder="Selecciona o escribe una categoría..."
                 className="w-full px-3 py-2 bg-slate-900 border border-slate-700 text-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-              />
-              <datalist id="expense-categories">
-                <option value="Nómina" />
-                <option value="Suministros" />
-                <option value="Servicios Públicos" />
-                <option value="Alquiler" />
-                <option value="Mantenimiento" />
-                <option value="Transporte" />
-                <option value="Tecnología" />
-                <option value="Marketing" />
-                <option value="Impuestos" />
-                <option value="Seguros" />
-                <option value="Capacitación" />
-                <option value="Otros" />
-              </datalist>
+              >
+                <option value="">Sin categoria</option>
+                {categories.map((cat) => (
+                  <option key={cat.id} value={cat.name}>
+                    {cat.name} {cat.workspace_id === null ? "(Global)" : ""}
+                  </option>
+                ))}
+              </select>
               <p className="text-xs text-slate-400 mt-1">
-                Selecciona una categoría existente o escribe una nueva
+                Administra categorias desde el boton "Categorias"
               </p>
             </div>
+          </div>
+
+          {/* Checkbox para gasto global */}
+          <div className="flex items-center gap-3 p-3 bg-purple-900/20 border border-purple-800 rounded-lg">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isShared}
+                onChange={(e) => setIsShared(e.target.checked)}
+                className="w-5 h-5 rounded border-slate-600 bg-slate-700 text-purple-600 focus:ring-purple-500"
+              />
+              <span className="text-slate-200 font-medium">Gasto global</span>
+            </label>
+            <span className="text-xs text-purple-300">
+              (visible en todos los workspaces)
+            </span>
           </div>
 
           <button
@@ -660,6 +718,11 @@ function ExpensesTab() {
                     >
                       {expense.expense_type === "one_time" ? "Único" : "Recurrente"}
                     </span>
+                    {expense.is_shared && (
+                      <span className="text-xs px-2 py-1 rounded bg-purple-900/50 text-purple-300 border border-purple-700">
+                        Global
+                      </span>
+                    )}
                     {!expense.is_active && (
                       <span className="text-xs px-2 py-1 rounded bg-gray-700 text-gray-300 border border-gray-600">
                         Desactivado
@@ -715,247 +778,155 @@ function ExpensesTab() {
           <p className="text-slate-400 text-center py-8">No hay gastos registrados para este mes</p>
         )}
       </div>
-    </div>
-  );
-}
 
-// ============================================================================
-// TAB DE INFRACCIONES
-// ============================================================================
+      {/* Modal de Categorias */}
+      {showCategoriesModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-800 rounded-lg w-full max-w-lg border border-slate-700 shadow-xl max-h-[80vh] flex flex-col">
+            {/* Header */}
+            <div className="p-4 border-b border-slate-700 flex justify-between items-center">
+              <h2 className="text-xl font-semibold text-white">Gestionar Categorias de Gastos</h2>
+              <button
+                onClick={() => setShowCategoriesModal(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
 
-function InfractionsTab() {
-  const queryClient = useQueryClient();
-  const [showActiveOnly, setShowActiveOnly] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [selectedClient, setSelectedClient] = useState<string>("");
-  const [reason, setReason] = useState<string>("");
-  const [relatedInvoiceId, setRelatedInvoiceId] = useState<string>("");
-
-  // Obtener lista de clientes
-  const { data: clients = [] } = useQuery({
-    queryKey: ["clients-list"],
-    queryFn: async () => (await api.get("/clients")).data,
-  });
-
-  const { data: infractions, isLoading } = useQuery({
-    queryKey: ["infractions", showActiveOnly],
-    queryFn: async () =>
-      (await api.get<Infraction[]>(`/infractions?isActive=${showActiveOnly}`)).data,
-  });
-
-  const createInfractionMutation = useMutation({
-    mutationFn: async (data: { clientUserId: number; reason: string; relatedInvoiceId?: number; confirmDeactivation?: boolean }) => {
-      return await api.post("/infractions", data);
-    },
-    onSuccess: (response) => {
-      queryClient.invalidateQueries({ queryKey: ["infractions"] });
-      queryClient.invalidateQueries({ queryKey: ["admin-summary"] });
-      queryClient.invalidateQueries({ queryKey: ["clients-list"] });
-      setShowForm(false);
-      setSelectedClient("");
-      setReason("");
-      setRelatedInvoiceId("");
-
-      if (response.data.clientDeactivated) {
-        alert("⚠️ " + response.data.message);
-      } else {
-        alert(response.data.message);
-      }
-    },
-    onError: (err: any) => {
-      if (err?.response?.data?.error === 'warning_third_infraction') {
-        const confirmed = confirm(err.response.data.message + "\n\n¿Deseas continuar y crear esta infracción?");
-        if (confirmed) {
-          // Reintentar con confirmación
-          createInfractionMutation.mutate({
-            clientUserId: parseInt(selectedClient),
-            reason,
-            relatedInvoiceId: relatedInvoiceId ? parseInt(relatedInvoiceId) : undefined,
-            confirmDeactivation: true
-          });
-        }
-      } else {
-        alert(err?.response?.data?.message || err?.response?.data?.error || "Error al crear infracción");
-      }
-    }
-  });
-
-  const resolveInfractionMutation = useMutation({
-    mutationFn: async (id: number) => {
-      const notes = prompt("Notas de resolución (opcional):");
-      if (notes === null) throw new Error("Cancelado");
-      await api.patch(`/infractions/${id}/resolve`, {
-        resolutionNotes: notes || "Desactivada por administrador",
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["infractions"] });
-      queryClient.invalidateQueries({ queryKey: ["admin-summary"] });
-      alert("Infracción desactivada correctamente");
-    },
-    onError: (err: any) => {
-      if (err.message !== "Cancelado") {
-        alert("Error al desactivar infracción");
-      }
-    }
-  });
-
-  const handleCreateInfraction = () => {
-    if (!selectedClient || !reason.trim()) {
-      alert("Por favor selecciona un cliente e ingresa el motivo de la infracción");
-      return;
-    }
-
-    createInfractionMutation.mutate({
-      clientUserId: parseInt(selectedClient),
-      reason,
-      relatedInvoiceId: relatedInvoiceId ? parseInt(relatedInvoiceId) : undefined
-    });
-  };
-
-  if (isLoading) return <div className="text-slate-400">Cargando infracciones...</div>;
-
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h3 className="text-lg font-semibold text-white">Infracciones de Clientes</h3>
-        <div className="flex items-center gap-4">
-          <label className="flex items-center gap-2 text-slate-300">
-            <input
-              type="checkbox"
-              checked={showActiveOnly}
-              onChange={(e) => setShowActiveOnly(e.target.checked)}
-              className="rounded bg-slate-800 border-slate-600"
-            />
-            <span className="text-sm">Solo activas</span>
-          </label>
-          <button
-            onClick={() => {
-              if (showForm) {
-                setShowForm(false);
-                setSelectedClient("");
-                setReason("");
-                setRelatedInvoiceId("");
-              } else {
-                setShowForm(true);
-              }
-            }}
-            className="bg-gradient-to-r from-orange-600 to-amber-600 text-white px-4 py-2 rounded-lg hover:from-orange-700 hover:to-amber-700 font-medium"
-          >
-            {showForm ? "Cancelar" : "+ Agregar Infracción"}
-          </button>
-        </div>
-      </div>
-
-      {/* Formulario de creación */}
-      {showForm && (
-        <div className="bg-slate-800 border border-slate-700 rounded-lg p-6 space-y-4">
-          <h4 className="font-semibold text-white">Nueva Infracción</h4>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1">Cliente *</label>
-            <select
-              value={selectedClient}
-              onChange={(e) => setSelectedClient(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-900 border border-slate-700 text-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-            >
-              <option value="">Seleccionar cliente...</option>
-              {clients.map((client: any) => (
-                <option key={client.id} value={client.id}>
-                  {client.full_name} ({client.email})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1">Motivo de la Infracción *</label>
-            <textarea
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              rows={3}
-              placeholder="Ej: Cliente no ha pagado facturas de los últimos 2 meses"
-              className="w-full px-3 py-2 bg-slate-900 border border-slate-700 text-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1">Factura Relacionada (opcional)</label>
-            <input
-              type="number"
-              value={relatedInvoiceId}
-              onChange={(e) => setRelatedInvoiceId(e.target.value)}
-              placeholder="ID de factura relacionada"
-              className="w-full px-3 py-2 bg-slate-900 border border-slate-700 text-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-            />
-          </div>
-
-          <button
-            onClick={handleCreateInfraction}
-            disabled={createInfractionMutation.isPending}
-            className="w-full bg-gradient-to-r from-orange-600 to-amber-600 text-white px-4 py-2 rounded-lg hover:from-orange-700 hover:to-amber-700 disabled:opacity-50 font-medium"
-          >
-            {createInfractionMutation.isPending ? "Creando..." : "Crear Infracción"}
-          </button>
-        </div>
-      )}
-
-      {/* Lista de infracciones */}
-      <div className="space-y-2">
-        {infractions && infractions.length > 0 ? (
-          infractions.map((infraction) => (
-            <div
-              key={infraction.id}
-              className={`border rounded-lg p-4 ${
-                infraction.is_active ? "bg-red-950/20 border-red-800" : "bg-slate-800 border-slate-700 opacity-70"
-              }`}
-            >
-              <div className="flex justify-between items-start">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <p className="font-semibold text-white">{infraction.client_name}</p>
-                    <span
-                      className={`text-xs px-2 py-1 rounded border ${
-                        infraction.infraction_type === "automatic_unpaid"
-                          ? "bg-red-900/30 text-red-400 border-red-800"
-                          : "bg-orange-900/30 text-orange-400 border-orange-800"
-                      }`}
-                    >
-                      {infraction.infraction_type === "automatic_unpaid" ? "No Pago Automático" : "Manual"}
-                    </span>
-                    {infraction.is_active ? (
-                      <span className="text-xs px-2 py-1 rounded bg-red-500 text-white">ACTIVA</span>
-                    ) : (
-                      <span className="text-xs px-2 py-1 rounded bg-gray-700 text-gray-300 border border-gray-600">DESACTIVADA</span>
-                    )}
-                  </div>
-                  <p className="text-sm text-slate-300 mb-2">{infraction.reason}</p>
-                  <p className="text-xs text-slate-400">
-                    Fecha: {new Date(infraction.created_at).toLocaleDateString()}
-                    {infraction.invoice_month && infraction.invoice_year && (
-                      <> • Factura: {infraction.invoice_month}/{infraction.invoice_year}</>
-                    )}
-                    {infraction.created_by_name && <> • Creada por: {infraction.created_by_name}</>}
-                  </p>
-                </div>
-                {infraction.is_active && (
+            {/* Body */}
+            <div className="p-4 overflow-y-auto flex-1 space-y-4">
+              {/* Nueva categoria */}
+              <div className="bg-slate-900 rounded-lg p-4 border border-slate-700">
+                <h3 className="text-sm font-medium text-slate-300 mb-3">Nueva Categoria</h3>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newCategoryName}
+                    onChange={(e) => setNewCategoryName(e.target.value)}
+                    placeholder="Nombre de la categoria..."
+                    className="flex-1 px-3 py-2 bg-slate-800 border border-slate-600 text-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                  <input
+                    type="color"
+                    value={newCategoryColor}
+                    onChange={(e) => setNewCategoryColor(e.target.value)}
+                    className="w-12 h-10 rounded cursor-pointer border border-slate-600"
+                    title="Color de la categoria"
+                  />
                   <button
-                    onClick={() => resolveInfractionMutation.mutate(infraction.id)}
-                    disabled={resolveInfractionMutation.isPending}
-                    className="bg-yellow-600 text-white px-3 py-1 rounded text-sm hover:bg-yellow-700 disabled:opacity-50"
+                    onClick={() => {
+                      if (!newCategoryName.trim()) return;
+                      createCategoryMutation.mutate({
+                        name: newCategoryName.trim(),
+                        color: newCategoryColor
+                      });
+                    }}
+                    disabled={createCategoryMutation.isPending || !newCategoryName.trim()}
+                    className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50"
                   >
-                    Desactivar
+                    {createCategoryMutation.isPending ? "..." : "Agregar"}
                   </button>
+                </div>
+              </div>
+
+              {/* Lista de categorias */}
+              <div className="space-y-2">
+                <h3 className="text-sm font-medium text-slate-300">Categorias Existentes</h3>
+                {categories.length === 0 ? (
+                  <p className="text-slate-400 text-sm py-4 text-center">No hay categorias</p>
+                ) : (
+                  categories.map((cat) => (
+                    <div
+                      key={cat.id}
+                      className="flex items-center justify-between p-3 bg-slate-900 rounded-lg border border-slate-700"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="w-4 h-4 rounded-full"
+                          style={{ backgroundColor: cat.color }}
+                        />
+                        {editingCategory?.id === cat.id ? (
+                          <input
+                            type="text"
+                            value={editingCategory.name}
+                            onChange={(e) => setEditingCategory({ ...editingCategory, name: e.target.value })}
+                            className="px-2 py-1 bg-slate-800 border border-slate-600 text-slate-200 rounded focus:outline-none focus:ring-2 focus:ring-orange-500"
+                          />
+                        ) : (
+                          <span className="text-slate-200">{cat.name}</span>
+                        )}
+                        <span className={`text-xs px-2 py-0.5 rounded ${
+                          cat.workspace_id === null
+                            ? 'bg-purple-900/50 text-purple-300 border border-purple-700'
+                            : 'bg-slate-700 text-slate-400'
+                        }`}>
+                          {cat.workspace_id === null ? 'Global' : 'Local'}
+                        </span>
+                      </div>
+                      <div className="flex gap-1">
+                        {editingCategory?.id === cat.id ? (
+                          <>
+                            <button
+                              onClick={() => {
+                                updateCategoryMutation.mutate({
+                                  id: cat.id,
+                                  data: { name: editingCategory.name }
+                                });
+                              }}
+                              className="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
+                            >
+                              Guardar
+                            </button>
+                            <button
+                              onClick={() => setEditingCategory(null)}
+                              className="px-2 py-1 bg-slate-600 text-white text-xs rounded hover:bg-slate-500"
+                            >
+                              Cancelar
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => setEditingCategory(cat)}
+                              className="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
+                              title="Editar"
+                            >
+                              ✏️
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (confirm(`¿Eliminar la categoria "${cat.name}"?`)) {
+                                  deleteCategoryMutation.mutate(cat.id);
+                                }
+                              }}
+                              className="px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
+                              title="Eliminar"
+                            >
+                              🗑️
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ))
                 )}
               </div>
+
+              {/* Info */}
+              <div className="bg-blue-900/30 border border-blue-700 rounded-lg p-3">
+                <p className="text-blue-200 text-sm">
+                  Las categorias <strong>"Global"</strong> son visibles en todos los workspaces.
+                  Las categorias <strong>"Local"</strong> solo en este workspace.
+                </p>
+              </div>
             </div>
-          ))
-        ) : (
-          <p className="text-slate-400 text-center py-8">
-            {showActiveOnly ? "No hay infracciones activas" : "No hay infracciones registradas"}
-          </p>
-        )}
-      </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+

@@ -9,7 +9,8 @@ import {
   createInfraction,
   resolveInfraction,
   deleteInfraction,
-  getInfractionSummary
+  getInfractionSummary,
+  getClientInfractions
 } from "../controllers/infractions.controller";
 
 const router = Router();
@@ -32,7 +33,7 @@ router.post(
     body: z.object({
       clientUserId: z.number().int().positive(),
       reason: z.string().min(1),
-      relatedInvoiceId: z.number().int().positive().optional(),
+      relatedInvoiceId: z.number().int().positive().optional().nullable(),
       confirmDeactivation: z.boolean().optional()
     })
   })),
@@ -63,6 +64,13 @@ router.get(
   "/summary/:clientId",
   requireRoles("admin", "employee"),
   getInfractionSummary
+);
+
+// Obtener historial completo de infracciones de un cliente
+router.get(
+  "/client/:clientId",
+  requireRoles("admin", "employee"),
+  getClientInfractions
 );
 
 export default router;

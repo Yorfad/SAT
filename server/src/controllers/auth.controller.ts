@@ -5,6 +5,7 @@ import jwt, { Secret, SignOptions } from "jsonwebtoken";
 import { env } from "../config/env";
 import { WorkspaceService } from "../services/workspace.service";
 import { ClientService } from "../services/client.service";
+import { PermissionService } from "../services/permission.service";
 import { getAllTenantPools } from "../config/database";
 
 // Función para generar contraseña aleatoria segura
@@ -89,6 +90,21 @@ const workspaceService = new WorkspaceService(db);
 const primaryWorkspace = await workspaceService.getPrimaryWorkspace(u.id);
 const userWorkspaces = await workspaceService.getUserWorkspaces(u.id);
 
+// Obtener permisos efectivos del usuario
+const permissionService = new PermissionService(db);
+let permissions: string[] = [];
+
+// Admin tiene todos los permisos implícitamente
+if (u.role === 'admin') {
+  permissions = ['*']; // Marcador especial que significa "todos los permisos"
+} else {
+  // Para otros roles, obtener permisos específicos
+  const effectivePermissions = await permissionService.getUserEffectivePermissions(u.id);
+  permissions = effectivePermissions
+    .filter(p => p.granted)
+    .map(p => p.permission_key);
+}
+
 const token = jwt.sign(
   {
     sub: u.id,
@@ -111,6 +127,7 @@ res.json({
     default_workspace: primaryWorkspace,
     workspaces: userWorkspaces
   },
+  permissions, // Lista de permisos efectivos
   tenant: req.tenantSlug
 });
 }

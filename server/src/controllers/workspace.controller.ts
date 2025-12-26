@@ -100,7 +100,14 @@ export const updateWorkspace: RequestHandler = async (req: any, res) => {
   try {
     const workspaceService = new WorkspaceService(req.db);
     const { id } = req.params;
-    const { name, description, color, icon, is_active } = req.body;
+    const {
+      name, description, color, icon, is_active,
+      // Nuevos campos de configuración de infracciones
+      max_infractions,
+      infraction_color_0_bg, infraction_color_0_text,
+      infraction_color_1_bg, infraction_color_1_text,
+      infraction_color_2_bg, infraction_color_2_text
+    } = req.body;
 
     // Verificar que tenga rol de admin u owner en el workspace
     const role = await workspaceService.getUserRoleInWorkspace(req.user.id, Number(id));
@@ -108,7 +115,13 @@ export const updateWorkspace: RequestHandler = async (req: any, res) => {
       return res.status(403).json({ message: 'No tienes permisos para modificar este workspace' });
     }
 
-    await workspaceService.updateWorkspace(Number(id), { name, description, color, icon, is_active });
+    await workspaceService.updateWorkspace(Number(id), {
+      name, description, color, icon, is_active,
+      max_infractions,
+      infraction_color_0_bg, infraction_color_0_text,
+      infraction_color_1_bg, infraction_color_1_text,
+      infraction_color_2_bg, infraction_color_2_text
+    });
 
     const workspace = await workspaceService.getWorkspaceById(Number(id));
 

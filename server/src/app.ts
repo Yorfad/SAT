@@ -31,6 +31,7 @@ import workspaceRoutes from "./routes/workspace.routes";
 import invitationsRoutes from "./routes/invitations.routes";
 import clientFieldsRoutes from "./routes/client-fields.routes";
 import bulkAssignmentRoutes from "./routes/bulk-assignment.routes";
+import expenseCategoriesRoutes from "./routes/expense-categories.routes";
 
 
 import { resolveTenant } from "./middleware/resolveTenant";
@@ -113,6 +114,7 @@ app.use("/api/workspaces", workspaceRoutes);
 app.use("/api/invitations", invitationsRoutes);
 app.use("/api/client-fields", clientFieldsRoutes);
 app.use("/api/bulk-assignment", bulkAssignmentRoutes);
+app.use("/api/expense-categories", expenseCategoriesRoutes);
 
 
 app.use(errorHandler);

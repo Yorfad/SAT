@@ -147,6 +147,35 @@ export class WorkspaceService {
       updates.push('is_active = ?');
       params.push(data.is_active);
     }
+    // Configuración de infracciones
+    if (data.max_infractions !== undefined) {
+      updates.push('max_infractions = ?');
+      params.push(data.max_infractions);
+    }
+    if (data.infraction_color_0_bg !== undefined) {
+      updates.push('infraction_color_0_bg = ?');
+      params.push(data.infraction_color_0_bg || null);
+    }
+    if (data.infraction_color_0_text !== undefined) {
+      updates.push('infraction_color_0_text = ?');
+      params.push(data.infraction_color_0_text || null);
+    }
+    if (data.infraction_color_1_bg !== undefined) {
+      updates.push('infraction_color_1_bg = ?');
+      params.push(data.infraction_color_1_bg);
+    }
+    if (data.infraction_color_1_text !== undefined) {
+      updates.push('infraction_color_1_text = ?');
+      params.push(data.infraction_color_1_text);
+    }
+    if (data.infraction_color_2_bg !== undefined) {
+      updates.push('infraction_color_2_bg = ?');
+      params.push(data.infraction_color_2_bg);
+    }
+    if (data.infraction_color_2_text !== undefined) {
+      updates.push('infraction_color_2_text = ?');
+      params.push(data.infraction_color_2_text);
+    }
 
     if (updates.length === 0) return;
 

@@ -76,8 +76,19 @@ export const listInfractions: RequestHandler = async (req: any, res: any) => {
 export const createInfraction: RequestHandler = async (req: any, res: any) => {
   const { clientUserId, reason, relatedInvoiceId, confirmDeactivation } = req.body;
   const createdByUserId = req.user.id;
+  const workspaceId = req.workspaceId;
 
   try {
+    // Obtener el límite de infracciones del workspace
+    let maxInfractions = 3; // default
+    if (workspaceId) {
+      const [wsRows]: any = await req.db.query(
+        'SELECT max_infractions FROM workspaces WHERE id = ?',
+        [workspaceId]
+      );
+      maxInfractions = wsRows[0]?.max_infractions || 3;
+    }
+
     // Contar infracciones activas del cliente
     const [activeInfractions]: any = await req.db.query(
       `SELECT COUNT(*) as count FROM client_infractions
@@ -87,12 +98,13 @@ export const createInfraction: RequestHandler = async (req: any, res: any) => {
 
     const activeCount = activeInfractions[0].count;
 
-    // Si tiene 2 infracciones activas y no se ha confirmado, devolver advertencia
-    if (activeCount === 2 && !confirmDeactivation) {
+    // Si está a una infracción del límite y no se ha confirmado, devolver advertencia
+    if (activeCount === maxInfractions - 1 && !confirmDeactivation) {
       return res.status(400).json({
         error: 'warning_third_infraction',
-        message: '⚠️ ADVERTENCIA: Este cliente ya tiene 2 infracciones activas. Al agregar una tercera infracción, el cliente será DESACTIVADO AUTOMÁTICAMENTE.',
+        message: `⚠️ ADVERTENCIA: Este cliente ya tiene ${activeCount} infracciones activas. Al agregar una más alcanzará el límite de ${maxInfractions} y será DESACTIVADO AUTOMÁTICAMENTE.`,
         activeInfractions: activeCount,
+        maxInfractions,
         requiresConfirmation: true
       });
     }
@@ -105,21 +117,21 @@ export const createInfraction: RequestHandler = async (req: any, res: any) => {
       [clientUserId, reason, relatedInvoiceId || null, createdByUserId]
     );
 
-    // Si con esta infracción llega a 3 activas, desactivar el cliente
-    if (activeCount >= 2) {
+    // Si con esta infracción alcanza el límite, desactivar el cliente
+    if (activeCount >= maxInfractions - 1) {
       await req.db.query(
         `UPDATE users
          SET is_active = FALSE,
-             deactivation_reason = 'Desactivado automáticamente por 3 infracciones activas',
+             deactivation_reason = ?,
              deactivated_at = NOW()
          WHERE id = ?`,
-        [clientUserId]
+        [`Desactivado automáticamente por alcanzar ${maxInfractions} infracciones activas`, clientUserId]
       );
 
       return res.json({
         success: true,
         infractionId: result.insertId,
-        message: "Infracción creada correctamente. El cliente ha sido desactivado automáticamente por alcanzar 3 infracciones activas.",
+        message: `Infracción creada correctamente. El cliente ha sido desactivado automáticamente por alcanzar ${maxInfractions} infracciones activas.`,
         clientDeactivated: true
       });
     }
@@ -223,5 +235,43 @@ export const getInfractionSummary: RequestHandler = async (req: any, res: any) =
   } catch (error) {
     console.error('Error obteniendo resumen de infracciones:', error);
     res.status(500).json({ error: 'Error al obtener resumen' });
+  }
+};
+
+/**
+ * GET /api/infractions/client/:clientId
+ * Obtener historial completo de infracciones de un cliente
+ */
+export const getClientInfractions: RequestHandler = async (req: any, res: any) => {
+  const { clientId } = req.params;
+
+  try {
+    const [infractions]: any = await req.db.query(
+      `SELECT
+        ci.id,
+        ci.infraction_type,
+        ci.reason,
+        ci.is_active,
+        ci.created_at,
+        ci.resolved_at,
+        ci.resolution_notes,
+        creator.full_name as created_by_name,
+        resolver.full_name as resolved_by_name,
+        mi.invoice_year,
+        mi.invoice_month,
+        mi.total_due as invoice_amount
+       FROM client_infractions ci
+       LEFT JOIN users creator ON creator.id = ci.created_by_user_id
+       LEFT JOIN users resolver ON resolver.id = ci.resolved_by_user_id
+       LEFT JOIN monthly_invoices mi ON mi.id = ci.related_invoice_id
+       WHERE ci.client_user_id = ?
+       ORDER BY ci.created_at DESC`,
+      [clientId]
+    );
+
+    res.json(infractions);
+  } catch (error) {
+    console.error('Error obteniendo historial de infracciones:', error);
+    res.status(500).json({ error: 'Error al obtener historial de infracciones' });
   }
 };

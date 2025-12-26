@@ -13,6 +13,7 @@ export interface User {
 export interface LoginResponse {
   token: string;
   user: User;
+  permissions?: string[];  // Lista de permisos efectivos (ej: ["infractions:create", "expenses:list"])
   tenant: string; // slug
 }
 

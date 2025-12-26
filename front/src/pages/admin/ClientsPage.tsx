@@ -2,6 +2,10 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../../lib/api";
 import { Link } from "react-router-dom";
+import { useAuth } from "../../context/AuthContext";
+import { useWorkspace } from "../../context/WorkspaceContext";
+import InfractionModal from "../../components/InfractionModal";
+import InfractionHistoryModal from "../../components/InfractionHistoryModal";
 
 // ============ TYPES ============
 interface ClientField {
@@ -75,7 +79,6 @@ type Service = {
 // ============ CONSTANTS ============
 const TABS = [
   { id: 'clients', label: 'Clientes', icon: '👥' },
-  { id: 'assign-tasks', label: 'Asignar Tareas', icon: '📋' },
   { id: 'pool', label: 'Pool de Tareas', icon: '🔧' },
 ] as const;
 
@@ -102,9 +105,11 @@ const statusColors = {
 // ============ COMPONENT ============
 export default function ClientsPage() {
   const queryClient = useQueryClient();
+  const { hasPermission } = useAuth();
+  const { currentWorkspace } = useWorkspace();
 
   // Tab activo
-  const [activeTab, setActiveTab] = useState<'clients' | 'assign-tasks' | 'pool'>('clients');
+  const [activeTab, setActiveTab] = useState<'clients' | 'pool'>('clients');
 
   // Filtros avanzados
   const [filters, setFilters] = useState<Filter[]>([]);
@@ -117,6 +122,10 @@ export default function ClientsPage() {
   const [showCreateClientModal, setShowCreateClientModal] = useState(false);
   const [showResetPasswordModal, setShowResetPasswordModal] = useState(false);
   const [showAddPoolTaskModal, setShowAddPoolTaskModal] = useState(false);
+  const [showInfractionModal, setShowInfractionModal] = useState(false);
+  const [infractionClient, setInfractionClient] = useState<Client | null>(null);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [historyClient, setHistoryClient] = useState<Client | null>(null);
 
   // Estado de formularios
   const [bulkAssignUserId, setBulkAssignUserId] = useState<number | null>(null);
@@ -366,6 +375,27 @@ export default function ClientsPage() {
     );
   };
 
+  // Helper para obtener estilos de infracción por cliente
+  // Obtiene colores de infracción - solo fondo, el texto se maneja por CSS variable
+  const getInfractionStyle = (count: number): { bg: string; text: string } => {
+    if (count === 0) {
+      return {
+        bg: currentWorkspace?.infraction_color_0_bg || '',
+        text: currentWorkspace?.infraction_color_0_text || ''
+      };
+    }
+    if (count === 1) {
+      return {
+        bg: currentWorkspace?.infraction_color_1_bg || '#FEF3C7',
+        text: currentWorkspace?.infraction_color_1_text || '#92400E'
+      };
+    }
+    return {
+      bg: currentWorkspace?.infraction_color_2_bg || '#FEE2E2',
+      text: currentWorkspace?.infraction_color_2_text || '#991B1B'
+    };
+  };
+
   const toggleAllClients = () => {
     if (selectedClients.length === clients.length) {
       setSelectedClients([]);
@@ -452,7 +482,7 @@ export default function ClientsPage() {
           {TABS.map(tab => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => { setActiveTab(tab.id); setSelectedClients([]); }}
               className={`px-4 py-3 text-sm font-medium rounded-t-lg transition-colors flex items-center gap-2 ${
                 activeTab === tab.id
                   ? 'bg-slate-900 text-orange-400 border-b-2 border-orange-500'
@@ -471,8 +501,8 @@ export default function ClientsPage() {
         </nav>
       </div>
 
-      {/* Filtros Avanzados (visible en tabs clientes y asignar tareas) */}
-      {(activeTab === 'clients' || activeTab === 'assign-tasks') && (
+      {/* Filtros Avanzados (visible en tab clientes) */}
+      {activeTab === 'clients' && (
         <div className="bg-slate-900 border border-slate-700 rounded-lg p-4">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-medium text-white flex items-center gap-2">
@@ -581,7 +611,7 @@ export default function ClientsPage() {
       )}
 
       {/* Barra de acciones masivas */}
-      {selectedClients.length > 0 && (activeTab === 'clients' || activeTab === 'assign-tasks') && (
+      {selectedClients.length > 0 && activeTab === 'clients' && (
         <div className="bg-orange-900/30 border border-orange-700 rounded-lg p-4 flex items-center justify-between">
           <span className="text-orange-300 font-medium">
             {selectedClients.length} cliente{selectedClients.length > 1 ? 's' : ''} seleccionado{selectedClients.length > 1 ? 's' : ''}
@@ -629,10 +659,14 @@ export default function ClientsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-700">
-                {clients.map((client) => (
+                {clients.map((client) => {
+                  const infStyle = getInfractionStyle(client.active_infractions_count || 0);
+                  const hasInfractions = (client.active_infractions_count || 0) > 0;
+                  return (
                   <tr
                     key={client.id}
-                    className={`hover:bg-slate-800/50 ${selectedClients.includes(client.id) ? 'bg-orange-900/20' : ''}`}
+                    style={{ backgroundColor: infStyle.bg || undefined }}
+                    className={`hover:opacity-90 transition-opacity ${selectedClients.includes(client.id) ? 'ring-2 ring-orange-500 ring-inset' : ''}`}
                   >
                     <td className="px-4 py-3">
                       <input
@@ -643,13 +677,19 @@ export default function ClientsPage() {
                       />
                     </td>
                     <td className="px-4 py-3">
-                      <Link to={`/admin/clients/${client.id}`} className="text-orange-400 hover:text-orange-300 font-medium">
+                      <span
+                        className="font-medium cursor-pointer hover:underline"
+                        style={{ color: hasInfractions ? infStyle.text : undefined }}
+                        onClick={() => window.location.href = `/admin/clients/${client.id}`}
+                      >
                         {client.full_name}
-                      </Link>
-                      <p className="text-sm text-slate-400">{client.email}</p>
+                      </span>
+                      <p className="text-sm" style={{ color: hasInfractions ? infStyle.text : '#94a3b8', opacity: hasInfractions ? 0.8 : 1 }}>
+                        {client.email}
+                      </p>
                     </td>
-                    <td className="px-4 py-3 text-slate-300">{client.nit || '-'}</td>
-                    <td className="px-4 py-3 text-slate-300">{client.phone_number || '-'}</td>
+                    <td className="px-4 py-3" style={{ color: hasInfractions ? infStyle.text : '#cbd5e1' }}>{client.nit || '-'}</td>
+                    <td className="px-4 py-3" style={{ color: hasInfractions ? infStyle.text : '#cbd5e1' }}>{client.phone_number || '-'}</td>
                     <td className="px-4 py-3">
                       <select
                         value={client.assigned_to_user_id || ""}
@@ -688,107 +728,40 @@ export default function ClientsPage() {
                         >
                           🔑
                         </button>
+                        {hasPermission('infractions:create') && (
+                          <button
+                            onClick={() => {
+                              setInfractionClient(client);
+                              setShowInfractionModal(true);
+                            }}
+                            className="text-sm text-red-400 hover:text-red-300"
+                            title="Registrar Infraccion"
+                          >
+                            ⚠️
+                          </button>
+                        )}
+                        {(client.active_infractions_count > 0) && hasPermission('infractions:list') && (
+                          <button
+                            onClick={() => {
+                              setHistoryClient(client);
+                              setShowHistoryModal(true);
+                            }}
+                            className="text-sm text-amber-400 hover:text-amber-300 flex items-center gap-1"
+                            title={`Ver ${client.active_infractions_count} infracción(es)`}
+                          >
+                            📋 {client.active_infractions_count}
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           )}
           {clients.length === 0 && !isLoadingClients && (
             <div className="p-8 text-center text-slate-400">No se encontraron clientes</div>
-          )}
-        </div>
-      )}
-
-      {/* Tab: Asignar Tareas */}
-      {activeTab === 'assign-tasks' && (
-        <div className="bg-slate-900 border border-slate-700 rounded-lg p-6">
-          <div className="text-center text-slate-400 mb-6">
-            <p className="text-lg">Selecciona clientes usando los filtros arriba</p>
-            <p className="text-sm mt-2">
-              {selectedClients.length > 0
-                ? `${selectedClients.length} cliente(s) seleccionado(s)`
-                : 'Ningún cliente seleccionado'}
-            </p>
-          </div>
-
-          {selectedClients.length > 0 && (
-            <div className="max-w-xl mx-auto space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">Servicio *</label>
-                <select
-                  value={assignTaskForm.serviceId}
-                  onChange={(e) => setAssignTaskForm({ ...assignTaskForm, serviceId: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white"
-                >
-                  <option value="">Seleccionar servicio...</option>
-                  {services.map(s => (
-                    <option key={s.id} value={s.id}>{s.service_name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">Asignar a (opcional)</label>
-                <select
-                  value={assignTaskForm.assignedTo}
-                  onChange={(e) => setAssignTaskForm({ ...assignTaskForm, assignedTo: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white"
-                >
-                  <option value="">Sin asignar (Pool)</option>
-                  {employees.map((e: Employee) => (
-                    <option key={e.id} value={e.id}>{e.full_name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Fecha límite</label>
-                  <input
-                    type="date"
-                    value={assignTaskForm.dueDate}
-                    onChange={(e) => setAssignTaskForm({ ...assignTaskForm, dueDate: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Prioridad</label>
-                  <select
-                    value={assignTaskForm.priority}
-                    onChange={(e) => setAssignTaskForm({ ...assignTaskForm, priority: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white"
-                  >
-                    <option value="low">Baja</option>
-                    <option value="medium">Media</option>
-                    <option value="high">Alta</option>
-                    <option value="urgent">Urgente</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">Notas</label>
-                <textarea
-                  value={assignTaskForm.notes}
-                  onChange={(e) => setAssignTaskForm({ ...assignTaskForm, notes: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white"
-                  rows={3}
-                  placeholder="Instrucciones adicionales..."
-                />
-              </div>
-
-              <button
-                onClick={handleAssignTasks}
-                disabled={!assignTaskForm.serviceId || assignTasksMutation.isPending}
-                className="w-full px-4 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-lg hover:from-orange-700 hover:to-amber-700 disabled:opacity-50"
-              >
-                {assignTasksMutation.isPending
-                  ? 'Asignando...'
-                  : `Crear ${selectedClients.length} Tarea${selectedClients.length > 1 ? 's' : ''}`}
-              </button>
-            </div>
           )}
         </div>
       )}
@@ -1374,6 +1347,32 @@ export default function ClientsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Modal: Registrar Infraccion */}
+      {showInfractionModal && infractionClient && (
+        <InfractionModal
+          client={{ id: infractionClient.id, full_name: infractionClient.full_name }}
+          onClose={() => {
+            setShowInfractionModal(false);
+            setInfractionClient(null);
+          }}
+          onSuccess={() => {
+            queryClient.invalidateQueries({ queryKey: ["clients"] });
+            queryClient.invalidateQueries({ queryKey: ["all-clients"] });
+          }}
+        />
+      )}
+
+      {/* Modal: Historial de Infracciones */}
+      {showHistoryModal && historyClient && (
+        <InfractionHistoryModal
+          client={{ id: historyClient.id, full_name: historyClient.full_name }}
+          onClose={() => {
+            setShowHistoryModal(false);
+            setHistoryClient(null);
+          }}
+        />
       )}
     </div>
   );

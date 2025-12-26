@@ -21,7 +21,6 @@ export const listUsers: RequestHandler = async (req: any, res) => {
         u.created_at
       FROM users u
       WHERE u.role IN ('admin', 'employee')
-        AND u.role != 'superadmin'
     `;
     const params: any[] = [];
 
