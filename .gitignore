@@ -47,8 +47,11 @@ nul
 *.xlsx
 RediculousCoding/
 
-# Claude settings
-.claude/settings.local.json
+# Claude Code (configuración local)
+.claude/
+
+# Specify (herramienta local)
+.specify/
 
 # Backups de base de datos
 backups/*.sql
