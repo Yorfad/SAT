@@ -94,6 +94,10 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 
     // Invalidar queries que dependen del workspace
     queryClient.invalidateQueries({ queryKey: ['clients'] });
+    queryClient.invalidateQueries({ queryKey: ['all-clients'] });
+    queryClient.invalidateQueries({ queryKey: ['client-management'] });
+    queryClient.invalidateQueries({ queryKey: ['client-management-filters'] });
+    queryClient.invalidateQueries({ queryKey: ['filterable-fields'] });
     queryClient.invalidateQueries({ queryKey: ['services'] });
     queryClient.invalidateQueries({ queryKey: ['invoices'] });
     queryClient.invalidateQueries({ queryKey: ['tasks'] });
@@ -101,6 +105,10 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     queryClient.invalidateQueries({ queryKey: ['board'] });
     queryClient.invalidateQueries({ queryKey: ['users'] });
+    queryClient.invalidateQueries({ queryKey: ['pool-items'] });
+    queryClient.invalidateQueries({ queryKey: ['expenses'] });
+    queryClient.invalidateQueries({ queryKey: ['infractions'] });
+    queryClient.invalidateQueries({ queryKey: ['my-clients'] });
   }, [queryClient]);
 
   const handleSetConsolidatedView = useCallback((consolidated: boolean) => {

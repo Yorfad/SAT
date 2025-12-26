@@ -1,19 +1,83 @@
 import { RequestHandler } from "express";
 import bcrypt from "bcryptjs";
 
+// Columnas del sistema que NO se pueden modificar ni eliminar
+// Solo las PKs, FKs y campos calculados automáticamente
+const SYSTEM_COLUMNS = [
+  'user_id',                    // PK - relación con users
+  'workspace_id',               // FK - workspace del cliente
+  'sat_password_encrypted',     // Contraseña SAT (encriptada)
+  'overall_rating',             // Calculado automáticamente
+  'active_infractions_count',   // Calculado automáticamente
+  'ratings_count'               // Calculado automáticamente
+];
+
+// Campos default que se crean con la tabla pero son editables/eliminables
+const DEFAULT_FIELDS = [
+  'contract_number',  // Número de contrato
+  'sede',             // Sede
+  'grupo',            // Grupo
+  'notes',            // Notas
+  'direccion',        // Dirección
+  'fecha_nacimiento', // Fecha de nacimiento
+  'empresa'           // Empresa/Compañía
+];
+
+// Mapeo de tipos de campo a tipos SQL
+const FIELD_TYPE_TO_SQL: Record<string, string> = {
+  'text': 'VARCHAR(255)',
+  'number': 'INT',
+  'email': 'VARCHAR(255)',
+  'phone': 'VARCHAR(50)',
+  'date': 'DATE',
+  'select': 'VARCHAR(100)',
+  'textarea': 'TEXT',
+  'checkbox': 'TINYINT(1)',
+  'decimal': 'DECIMAL(10,2)'
+};
+
+/**
+ * Obtener todas las columnas actuales de clients_profiles
+ */
+async function getExistingColumns(db: any): Promise<string[]> {
+  const [columns]: any = await db.query(
+    `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'clients_profiles'`
+  );
+  return columns.map((c: any) => c.COLUMN_NAME.toLowerCase());
+}
+
+/**
+ * Validar nombre de columna (solo letras, números y guión bajo)
+ */
+function isValidColumnName(name: string): boolean {
+  return /^[a-z][a-z0-9_]*$/.test(name) && name.length <= 50;
+}
+
 /**
  * GET /api/client-fields
- * Obtener todos los campos personalizados activos
+ * Obtener campos activos para el workspace actual (con herencia)
  */
 export const getClientFields: RequestHandler = async (req: any, res: any) => {
   try {
     const workspaceId = req.workspaceId || null;
 
+    // Obtener campos base (workspace_id IS NULL) y específicos del workspace
     const [fields] = await req.db.query(
-      `SELECT * FROM client_profile_fields
-       WHERE is_active = TRUE
-       AND (workspace_id IS NULL OR workspace_id = ?)
-       ORDER BY display_order ASC`,
+      `SELECT
+        cpf.*,
+        COALESCE(ws_override.is_required, cpf.is_required) as effective_required,
+        COALESCE(ws_override.show_in_registration, cpf.show_in_registration) as effective_show_registration,
+        COALESCE(ws_override.show_in_list, cpf.show_in_list) as effective_show_list,
+        COALESCE(ws_override.is_active, cpf.is_active) as effective_active,
+        ws_override.id as override_id
+       FROM client_profile_fields cpf
+       LEFT JOIN client_profile_fields ws_override
+         ON ws_override.field_key = cpf.field_key
+         AND ws_override.workspace_id = ?
+       WHERE cpf.workspace_id IS NULL
+         AND COALESCE(ws_override.is_active, cpf.is_active) = TRUE
+       ORDER BY COALESCE(ws_override.display_order, cpf.display_order) ASC`,
       [workspaceId]
     );
 
@@ -26,20 +90,40 @@ export const getClientFields: RequestHandler = async (req: any, res: any) => {
 
 /**
  * GET /api/client-fields/all
- * Obtener todos los campos (incluyendo inactivos) - solo admin
+ * Obtener todos los campos (para admin) - incluye info de columnas
  */
 export const getAllClientFields: RequestHandler = async (req: any, res: any) => {
   try {
     const workspaceId = req.workspaceId || null;
+    const existingColumns = await getExistingColumns(req.db);
 
+    // Obtener campos base con override del workspace si existe
     const [fields] = await req.db.query(
-      `SELECT * FROM client_profile_fields
-       WHERE (workspace_id IS NULL OR workspace_id = ?)
-       ORDER BY display_order ASC`,
+      `SELECT
+        cpf.*,
+        ws_override.id as override_id,
+        ws_override.is_required as ws_required,
+        ws_override.show_in_registration as ws_show_registration,
+        ws_override.show_in_list as ws_show_list,
+        ws_override.is_active as ws_active,
+        ws_override.display_order as ws_display_order
+       FROM client_profile_fields cpf
+       LEFT JOIN client_profile_fields ws_override
+         ON ws_override.field_key = cpf.field_key
+         AND ws_override.workspace_id = ?
+       WHERE cpf.workspace_id IS NULL
+       ORDER BY cpf.display_order ASC`,
       [workspaceId]
     );
 
-    res.json(fields);
+    // Agregar info de si la columna existe realmente
+    const enrichedFields = (fields as any[]).map(f => ({
+      ...f,
+      column_exists: existingColumns.includes(f.field_key.toLowerCase()),
+      is_protected: SYSTEM_COLUMNS.includes(f.field_key)
+    }));
+
+    res.json(enrichedFields);
   } catch (error) {
     console.error('Error obteniendo campos:', error);
     res.status(500).json({ error: 'Error al obtener campos' });
@@ -48,7 +132,7 @@ export const getAllClientFields: RequestHandler = async (req: any, res: any) => 
 
 /**
  * POST /api/client-fields
- * Crear nuevo campo personalizado
+ * Crear nuevo campo - SOLO desde vista global (crea columna real)
  */
 export const createClientField: RequestHandler = async (req: any, res: any) => {
   const {
@@ -57,26 +141,64 @@ export const createClientField: RequestHandler = async (req: any, res: any) => {
     selectOptions, validationPattern
   } = req.body;
 
-  try {
-    const workspaceId = req.workspaceId || null;
+  const workspaceId = req.workspaceId;
 
-    // Obtener el orden máximo actual
-    const [[maxOrder]] = await req.db.query(
-      `SELECT COALESCE(MAX(display_order), 0) + 1 as next_order
-       FROM client_profile_fields
-       WHERE (workspace_id IS NULL OR workspace_id = ?)`,
-      [workspaceId]
+  // Solo se pueden crear campos desde vista global/consolidada
+  // O si no hay workspace específico
+  if (workspaceId && !req.isConsolidatedView) {
+    return res.status(403).json({
+      error: 'Los campos solo se pueden crear desde la vista General. Los workspaces específicos solo pueden modificar la configuración.'
+    });
+  }
+
+  // Validar nombre de columna
+  const columnName = fieldKey.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+  if (!isValidColumnName(columnName)) {
+    return res.status(400).json({
+      error: 'Nombre de campo inválido. Use solo letras minúsculas, números y guión bajo. Debe empezar con letra.'
+    });
+  }
+
+  // Verificar que no sea una columna del sistema
+  if (SYSTEM_COLUMNS.includes(columnName)) {
+    return res.status(400).json({
+      error: 'No se puede crear un campo con ese nombre, es una columna del sistema.'
+    });
+  }
+
+  try {
+    // Verificar si la columna ya existe
+    const existingColumns = await getExistingColumns(req.db);
+    if (existingColumns.includes(columnName)) {
+      return res.status(400).json({
+        error: 'Ya existe una columna con ese nombre en la tabla.'
+      });
+    }
+
+    // Determinar tipo SQL
+    const sqlType = FIELD_TYPE_TO_SQL[fieldType] || 'VARCHAR(255)';
+
+    // 1. Crear la columna real en clients_profiles
+    await req.db.query(
+      `ALTER TABLE clients_profiles ADD COLUMN \`${columnName}\` ${sqlType} NULL`
     );
 
-    const [result] = await req.db.query(
+    console.log(`[CLIENT-FIELDS] Columna creada: ${columnName} (${sqlType})`);
+
+    // 2. Obtener el orden máximo actual
+    const [[maxOrder]]: any = await req.db.query(
+      `SELECT COALESCE(MAX(display_order), 0) + 1 as next_order FROM client_profile_fields WHERE workspace_id IS NULL`
+    );
+
+    // 3. Registrar en client_profile_fields (configuración base)
+    const [result]: any = await req.db.query(
       `INSERT INTO client_profile_fields
        (workspace_id, field_key, field_label, field_type, placeholder,
         is_required, show_in_registration, show_in_list,
-        select_options, validation_pattern, display_order)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        select_options, validation_pattern, display_order, column_type, column_exists)
+       VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)`,
       [
-        workspaceId,
-        fieldKey,
+        columnName,
         fieldLabel,
         fieldType || 'text',
         placeholder || null,
@@ -85,70 +207,128 @@ export const createClientField: RequestHandler = async (req: any, res: any) => {
         showInList || false,
         selectOptions ? JSON.stringify(selectOptions) : null,
         validationPattern || null,
-        maxOrder.next_order
+        maxOrder.next_order,
+        sqlType
       ]
+    );
+
+    // 4. Registrar en tabla de columnas
+    await req.db.query(
+      `INSERT IGNORE INTO client_profile_columns (column_name, column_type, is_system, created_by_user_id)
+       VALUES (?, ?, 0, ?)`,
+      [columnName, sqlType, req.user?.sub || null]
     );
 
     res.status(201).json({
       success: true,
       id: result.insertId,
-      message: 'Campo creado correctamente'
+      columnName,
+      message: `Campo "${fieldLabel}" creado correctamente. Columna ${columnName} agregada a la tabla.`
     });
   } catch (error: any) {
     console.error('Error creando campo:', error);
     if (error.code === 'ER_DUP_ENTRY') {
-      return res.status(400).json({ error: 'Ya existe un campo con ese nombre interno' });
+      return res.status(400).json({ error: 'Ya existe un campo con ese nombre' });
     }
-    res.status(500).json({ error: 'Error al crear campo' });
+    if (error.code === 'ER_DUP_FIELDNAME') {
+      return res.status(400).json({ error: 'Ya existe una columna con ese nombre en la tabla' });
+    }
+    res.status(500).json({ error: 'Error al crear campo: ' + error.message });
   }
 };
 
 /**
  * PATCH /api/client-fields/:id
- * Actualizar campo personalizado
+ * Actualizar campo - comportamiento diferente según contexto
  */
 export const updateClientField: RequestHandler = async (req: any, res: any) => {
   const { id } = req.params;
   const updates = req.body;
+  const workspaceId = req.workspaceId;
+  const isGlobal = !workspaceId || req.isConsolidatedView;
 
   try {
-    const fields: string[] = [];
-    const params: any[] = [];
+    // Obtener el campo actual
+    const [[field]]: any = await req.db.query(
+      `SELECT * FROM client_profile_fields WHERE id = ?`,
+      [id]
+    );
 
-    const fieldMap: Record<string, string> = {
-      fieldLabel: 'field_label',
-      fieldType: 'field_type',
-      placeholder: 'placeholder',
-      isRequired: 'is_required',
-      isActive: 'is_active',
-      showInRegistration: 'show_in_registration',
-      showInList: 'show_in_list',
-      selectOptions: 'select_options',
-      validationPattern: 'validation_pattern',
-      displayOrder: 'display_order'
-    };
+    if (!field) {
+      return res.status(404).json({ error: 'Campo no encontrado' });
+    }
 
-    for (const [key, dbField] of Object.entries(fieldMap)) {
-      if (updates[key] !== undefined) {
-        fields.push(`${dbField} = ?`);
-        if (key === 'selectOptions') {
-          params.push(updates[key] ? JSON.stringify(updates[key]) : null);
-        } else {
-          params.push(updates[key]);
-        }
+    // Si es un campo del sistema, solo permitir cambios de visualización
+    if (SYSTEM_COLUMNS.includes(field.field_key)) {
+      const allowedUpdates = ['showInList', 'showInRegistration', 'displayOrder', 'isActive'];
+      const hasDisallowedUpdates = Object.keys(updates).some(k => !allowedUpdates.includes(k));
+      if (hasDisallowedUpdates) {
+        return res.status(403).json({
+          error: 'Este es un campo del sistema. Solo se puede modificar visibilidad y orden.'
+        });
       }
     }
 
-    if (fields.length === 0) {
-      return res.status(400).json({ error: 'No hay campos para actualizar' });
+    // Si estamos en un workspace específico, crear/actualizar override
+    if (!isGlobal && field.workspace_id === null) {
+      // Verificar si ya existe un override para este workspace
+      const [[existingOverride]]: any = await req.db.query(
+        `SELECT id FROM client_profile_fields
+         WHERE field_key = ? AND workspace_id = ?`,
+        [field.field_key, workspaceId]
+      );
+
+      if (existingOverride) {
+        // Actualizar override existente
+        await updateFieldRecord(req.db, existingOverride.id, updates);
+      } else {
+        // Crear nuevo override copiando configuración base
+        await req.db.query(
+          `INSERT INTO client_profile_fields
+           (workspace_id, field_key, field_label, field_type, placeholder,
+            is_required, show_in_registration, show_in_list,
+            select_options, validation_pattern, display_order)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            workspaceId,
+            field.field_key,
+            updates.fieldLabel ?? field.field_label,
+            field.field_type,
+            updates.placeholder ?? field.placeholder,
+            updates.isRequired ?? field.is_required,
+            updates.showInRegistration ?? field.show_in_registration,
+            updates.showInList ?? field.show_in_list,
+            field.select_options,
+            field.validation_pattern,
+            updates.displayOrder ?? field.display_order
+          ]
+        );
+      }
+
+      return res.json({
+        success: true,
+        message: 'Configuración del workspace actualizada'
+      });
     }
 
-    params.push(id);
-    await req.db.query(
-      `UPDATE client_profile_fields SET ${fields.join(', ')} WHERE id = ?`,
-      params
-    );
+    // Si estamos en vista global, actualizar el campo base
+    // Y si cambia el tipo, modificar la columna
+    if (updates.fieldType && updates.fieldType !== field.field_type) {
+      const newSqlType = FIELD_TYPE_TO_SQL[updates.fieldType] || 'VARCHAR(255)';
+      try {
+        await req.db.query(
+          `ALTER TABLE clients_profiles MODIFY COLUMN \`${field.field_key}\` ${newSqlType}`
+        );
+        console.log(`[CLIENT-FIELDS] Columna modificada: ${field.field_key} → ${newSqlType}`);
+      } catch (alterError: any) {
+        console.error('Error modificando columna:', alterError);
+        return res.status(400).json({
+          error: 'No se puede cambiar el tipo de dato. Puede haber datos incompatibles.'
+        });
+      }
+    }
 
+    await updateFieldRecord(req.db, id, updates);
     res.json({ success: true, message: 'Campo actualizado correctamente' });
   } catch (error) {
     console.error('Error actualizando campo:', error);
@@ -157,16 +337,58 @@ export const updateClientField: RequestHandler = async (req: any, res: any) => {
 };
 
 /**
+ * Helper para actualizar registro en client_profile_fields
+ */
+async function updateFieldRecord(db: any, id: number, updates: any) {
+  const fields: string[] = [];
+  const params: any[] = [];
+
+  const fieldMap: Record<string, string> = {
+    fieldLabel: 'field_label',
+    fieldType: 'field_type',
+    placeholder: 'placeholder',
+    isRequired: 'is_required',
+    isActive: 'is_active',
+    showInRegistration: 'show_in_registration',
+    showInList: 'show_in_list',
+    selectOptions: 'select_options',
+    validationPattern: 'validation_pattern',
+    displayOrder: 'display_order'
+  };
+
+  for (const [key, dbField] of Object.entries(fieldMap)) {
+    if (updates[key] !== undefined) {
+      fields.push(`${dbField} = ?`);
+      if (key === 'selectOptions') {
+        params.push(updates[key] ? JSON.stringify(updates[key]) : null);
+      } else {
+        params.push(updates[key]);
+      }
+    }
+  }
+
+  if (fields.length > 0) {
+    params.push(id);
+    await db.query(
+      `UPDATE client_profile_fields SET ${fields.join(', ')} WHERE id = ?`,
+      params
+    );
+  }
+}
+
+/**
  * DELETE /api/client-fields/:id
- * Eliminar campo personalizado
+ * Eliminar campo - SOLO desde vista global (elimina columna real)
  */
 export const deleteClientField: RequestHandler = async (req: any, res: any) => {
   const { id } = req.params;
+  const workspaceId = req.workspaceId;
+  const isGlobal = !workspaceId || req.isConsolidatedView;
 
   try {
-    // Verificar si es un campo del sistema (los primeros 5)
-    const [[field]] = await req.db.query(
-      `SELECT id FROM client_profile_fields WHERE id = ?`,
+    // Obtener el campo
+    const [[field]]: any = await req.db.query(
+      `SELECT * FROM client_profile_fields WHERE id = ?`,
       [id]
     );
 
@@ -174,8 +396,56 @@ export const deleteClientField: RequestHandler = async (req: any, res: any) => {
       return res.status(404).json({ error: 'Campo no encontrado' });
     }
 
-    await req.db.query(`DELETE FROM client_profile_fields WHERE id = ?`, [id]);
-    res.json({ success: true, message: 'Campo eliminado correctamente' });
+    // Si es un campo del sistema, no se puede eliminar
+    if (SYSTEM_COLUMNS.includes(field.field_key)) {
+      return res.status(403).json({
+        error: 'Este es un campo del sistema y no se puede eliminar.'
+      });
+    }
+
+    // Si es un override de workspace, solo eliminar el override
+    if (field.workspace_id !== null) {
+      await req.db.query(`DELETE FROM client_profile_fields WHERE id = ?`, [id]);
+      return res.json({
+        success: true,
+        message: 'Configuración del workspace restaurada a valores por defecto'
+      });
+    }
+
+    // Si es un campo base y no estamos en vista global, no permitir
+    if (!isGlobal) {
+      return res.status(403).json({
+        error: 'Los campos solo se pueden eliminar desde la vista General.'
+      });
+    }
+
+    // Eliminar columna de la tabla
+    try {
+      await req.db.query(
+        `ALTER TABLE clients_profiles DROP COLUMN \`${field.field_key}\``
+      );
+      console.log(`[CLIENT-FIELDS] Columna eliminada: ${field.field_key}`);
+    } catch (alterError: any) {
+      console.error('Error eliminando columna:', alterError);
+      // Continuar de todos modos para limpiar metadatos
+    }
+
+    // Eliminar todos los registros relacionados (base + overrides)
+    await req.db.query(
+      `DELETE FROM client_profile_fields WHERE field_key = ?`,
+      [field.field_key]
+    );
+
+    // Eliminar de tabla de columnas
+    await req.db.query(
+      `DELETE FROM client_profile_columns WHERE column_name = ?`,
+      [field.field_key]
+    );
+
+    res.json({
+      success: true,
+      message: `Campo "${field.field_label}" eliminado. Columna ${field.field_key} removida de la tabla.`
+    });
   } catch (error) {
     console.error('Error eliminando campo:', error);
     res.status(500).json({ error: 'Error al eliminar campo' });
@@ -188,13 +458,32 @@ export const deleteClientField: RequestHandler = async (req: any, res: any) => {
  */
 export const reorderClientFields: RequestHandler = async (req: any, res: any) => {
   const { orderedIds } = req.body;
+  const workspaceId = req.workspaceId;
 
   try {
     for (let i = 0; i < orderedIds.length; i++) {
-      await req.db.query(
-        `UPDATE client_profile_fields SET display_order = ? WHERE id = ?`,
-        [i, orderedIds[i]]
-      );
+      // Si hay workspace, actualizar el display_order del override o crearlo
+      if (workspaceId) {
+        const [[field]]: any = await req.db.query(
+          `SELECT field_key FROM client_profile_fields WHERE id = ?`,
+          [orderedIds[i]]
+        );
+
+        if (field) {
+          await req.db.query(
+            `INSERT INTO client_profile_fields (workspace_id, field_key, display_order, field_label, field_type)
+             SELECT ?, field_key, ?, field_label, field_type
+             FROM client_profile_fields WHERE id = ?
+             ON DUPLICATE KEY UPDATE display_order = VALUES(display_order)`,
+            [workspaceId, i, orderedIds[i]]
+          );
+        }
+      } else {
+        await req.db.query(
+          `UPDATE client_profile_fields SET display_order = ? WHERE id = ?`,
+          [i, orderedIds[i]]
+        );
+      }
     }
 
     res.json({ success: true, message: 'Campos reordenados correctamente' });
@@ -205,28 +494,116 @@ export const reorderClientFields: RequestHandler = async (req: any, res: any) =>
 };
 
 /**
+ * GET /api/client-fields/columns
+ * Obtener info de columnas reales de la tabla
+ */
+export const getTableColumns: RequestHandler = async (req: any, res: any) => {
+  try {
+    const [columns]: any = await req.db.query(
+      `SELECT
+        COLUMN_NAME as name,
+        DATA_TYPE as type,
+        IS_NULLABLE as nullable,
+        COLUMN_DEFAULT as defaultValue,
+        COLUMN_KEY as keyType
+       FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'clients_profiles'
+       ORDER BY ORDINAL_POSITION`
+    );
+
+    // Marcar columnas del sistema
+    const enriched = columns.map((col: any) => ({
+      ...col,
+      isSystem: SYSTEM_COLUMNS.includes(col.name.toLowerCase()),
+      isProtected: ['user_id', 'workspace_id'].includes(col.name.toLowerCase())
+    }));
+
+    res.json(enriched);
+  } catch (error) {
+    console.error('Error obteniendo columnas:', error);
+    res.status(500).json({ error: 'Error al obtener columnas' });
+  }
+};
+
+/**
+ * POST /api/client-fields/sync
+ * Sincronizar campos con columnas existentes (para campos que existen pero no tienen registro)
+ */
+export const syncFieldsWithColumns: RequestHandler = async (req: any, res: any) => {
+  try {
+    const existingColumns = await getExistingColumns(req.db);
+
+    // Obtener campos registrados
+    const [registeredFields]: any = await req.db.query(
+      `SELECT field_key FROM client_profile_fields WHERE workspace_id IS NULL`
+    );
+    const registeredKeys = registeredFields.map((f: any) => f.field_key.toLowerCase());
+
+    // Columnas que existen pero no están registradas
+    const unregistered = existingColumns.filter(
+      col => !registeredKeys.includes(col) && !SYSTEM_COLUMNS.includes(col)
+    );
+
+    let created = 0;
+    for (const colName of unregistered) {
+      // Obtener tipo de la columna
+      const [[colInfo]]: any = await req.db.query(
+        `SELECT DATA_TYPE, COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'clients_profiles' AND COLUMN_NAME = ?`,
+        [colName]
+      );
+
+      if (colInfo) {
+        await req.db.query(
+          `INSERT IGNORE INTO client_profile_fields
+           (workspace_id, field_key, field_label, field_type, column_type, column_exists)
+           VALUES (NULL, ?, ?, 'text', ?, TRUE)`,
+          [colName, colName.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()), colInfo.COLUMN_TYPE]
+        );
+        created++;
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Sincronización completada. ${created} campos nuevos registrados.`,
+      newFields: unregistered
+    });
+  } catch (error) {
+    console.error('Error sincronizando:', error);
+    res.status(500).json({ error: 'Error al sincronizar campos' });
+  }
+};
+
+// ============ Funciones existentes que se mantienen ============
+
+/**
  * GET /api/clients/:id/custom-values
- * Obtener valores personalizados de un cliente
+ * Obtener valores de campos dinámicos de un cliente
  */
 export const getClientCustomValues: RequestHandler = async (req: any, res: any) => {
   const { id } = req.params;
 
   try {
-    const [values] = await req.db.query(
-      `SELECT ccv.field_id, ccv.field_value, cpf.field_key
-       FROM client_custom_values ccv
-       JOIN client_profile_fields cpf ON cpf.id = ccv.field_id
-       WHERE ccv.client_user_id = ?`,
+    // Obtener campos dinámicos definidos
+    const [fields]: any = await req.db.query(
+      `SELECT field_key FROM client_profile_fields WHERE workspace_id IS NULL AND column_exists = TRUE`
+    );
+
+    if (fields.length === 0) {
+      return res.json({});
+    }
+
+    // Construir query para obtener valores de columnas dinámicas
+    const columnNames = fields.map((f: any) => `\`${f.field_key}\``).join(', ');
+
+    const [[values]]: any = await req.db.query(
+      `SELECT ${columnNames} FROM clients_profiles WHERE user_id = ?`,
       [id]
     );
 
-    // Convertir a objeto key-value
-    const result: Record<string, string> = {};
-    for (const v of values as any[]) {
-      result[v.field_key] = v.field_value;
-    }
-
-    res.json(result);
+    res.json(values || {});
   } catch (error) {
     console.error('Error obteniendo valores:', error);
     res.status(500).json({ error: 'Error al obtener valores' });
@@ -235,29 +612,36 @@ export const getClientCustomValues: RequestHandler = async (req: any, res: any) 
 
 /**
  * PATCH /api/clients/:id/custom-values
- * Guardar valores personalizados de un cliente
+ * Guardar valores de campos dinámicos de un cliente
  */
 export const saveClientCustomValues: RequestHandler = async (req: any, res: any) => {
   const { id } = req.params;
-  const values = req.body; // { field_key: value, ... }
+  const values = req.body;
 
   try {
-    // Obtener IDs de campos por su key
-    const [fields] = await req.db.query(
-      `SELECT id, field_key FROM client_profile_fields WHERE field_key IN (?)`,
-      [Object.keys(values)]
-    );
+    // Obtener columnas existentes para validar
+    const existingColumns = await getExistingColumns(req.db);
 
-    for (const field of fields as any[]) {
-      const value = values[field.field_key];
+    const updates: string[] = [];
+    const params: any[] = [];
 
-      await req.db.query(
-        `INSERT INTO client_custom_values (client_user_id, field_id, field_value)
-         VALUES (?, ?, ?)
-         ON DUPLICATE KEY UPDATE field_value = VALUES(field_value)`,
-        [id, field.id, value || null]
-      );
+    for (const [key, value] of Object.entries(values)) {
+      const colName = key.toLowerCase();
+      if (existingColumns.includes(colName) && !SYSTEM_COLUMNS.includes(colName)) {
+        updates.push(`\`${colName}\` = ?`);
+        params.push(value ?? null);
+      }
     }
+
+    if (updates.length === 0) {
+      return res.json({ success: true, message: 'No hay campos para actualizar' });
+    }
+
+    params.push(id);
+    await req.db.query(
+      `UPDATE clients_profiles SET ${updates.join(', ')} WHERE user_id = ?`,
+      params
+    );
 
     res.json({ success: true, message: 'Valores guardados correctamente' });
   } catch (error) {
@@ -273,12 +657,14 @@ export const saveClientCustomValues: RequestHandler = async (req: any, res: any)
 export const createClient: RequestHandler = async (req: any, res: any) => {
   const {
     fullName, email, password, nit, phoneNumber,
-    sede, grupo, contractNumber, customFields
+    customFields, ...dynamicFields
   } = req.body;
+
+  const workspaceId = req.workspaceId;
 
   try {
     // Verificar que el email no exista
-    const [[existing]] = await req.db.query(
+    const [[existing]]: any = await req.db.query(
       `SELECT id FROM users WHERE email = ?`,
       [email]
     );
@@ -291,7 +677,7 @@ export const createClient: RequestHandler = async (req: any, res: any) => {
     const hashedPassword = await bcrypt.hash(password || 'Cliente123!', 10);
 
     // Crear usuario
-    const [userResult] = await req.db.query(
+    const [userResult]: any = await req.db.query(
       `INSERT INTO users (email, password_hash, full_name, nit, phone_number, role, is_active)
        VALUES (?, ?, ?, ?, ?, 'client', TRUE)`,
       [email, hashedPassword, fullName, nit || null, phoneNumber || null]
@@ -299,15 +685,29 @@ export const createClient: RequestHandler = async (req: any, res: any) => {
 
     const userId = userResult.insertId;
 
+    // Preparar columnas dinámicas para el perfil
+    const existingColumns = await getExistingColumns(req.db);
+    const profileUpdates: string[] = ['user_id', 'workspace_id'];
+    const profileValues: any[] = [userId, workspaceId || null];
+
+    // Agregar campos del body que correspondan a columnas existentes
+    const allFields = { ...customFields, ...dynamicFields };
+    for (const [key, value] of Object.entries(allFields)) {
+      const colName = key.toLowerCase();
+      if (existingColumns.includes(colName) && !['user_id', 'workspace_id'].includes(colName)) {
+        profileUpdates.push(`\`${colName}\``);
+        profileValues.push(value ?? null);
+      }
+    }
+
     // Crear perfil de cliente
+    const placeholders = profileValues.map(() => '?').join(', ');
     await req.db.query(
-      `INSERT INTO clients_profiles (user_id, sede, grupo, contract_number)
-       VALUES (?, ?, ?, ?)`,
-      [userId, sede || null, grupo || null, contractNumber || null]
+      `INSERT INTO clients_profiles (${profileUpdates.join(', ')}) VALUES (${placeholders})`,
+      profileValues
     );
 
     // Asignar al workspace actual si existe
-    const workspaceId = req.workspaceId;
     if (workspaceId) {
       await req.db.query(
         `INSERT INTO user_workspaces (user_id, workspace_id, role_in_workspace)
@@ -316,32 +716,13 @@ export const createClient: RequestHandler = async (req: any, res: any) => {
       );
     }
 
-    // Guardar campos personalizados si existen
-    if (customFields && typeof customFields === 'object') {
-      const [fields] = await req.db.query(
-        `SELECT id, field_key FROM client_profile_fields WHERE field_key IN (?)`,
-        [Object.keys(customFields)]
-      );
-
-      for (const field of fields as any[]) {
-        const value = customFields[field.field_key];
-        if (value !== undefined && value !== '') {
-          await req.db.query(
-            `INSERT INTO client_custom_values (client_user_id, field_id, field_value)
-             VALUES (?, ?, ?)`,
-            [userId, field.id, value]
-          );
-        }
-      }
-    }
-
     res.status(201).json({
       success: true,
       id: userId,
       message: 'Cliente creado correctamente'
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error creando cliente:', error);
-    res.status(500).json({ error: 'Error al crear cliente' });
+    res.status(500).json({ error: 'Error al crear cliente: ' + error.message });
   }
 };

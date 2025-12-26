@@ -6,22 +6,25 @@ import { RequestHandler } from "express";
  */
 export const listPoolItems: RequestHandler = async (req: any, res: any) => {
   const { status, priority, assignedTo } = req.query;
+  const workspaceId = req.workspaceId;
+  const isConsolidated = req.isConsolidatedView;
+  const accessibleIds = req.accessibleWorkspaceIds || [];
 
   try {
     let query = `
       SELECT
-        cp.id,
-        cp.client_user_id,
-        cp.invoice_id,
-        cp.task_id,
-        cp.service_id,
-        cp.description,
-        cp.priority,
-        cp.status,
-        cp.added_at,
-        cp.started_at,
-        cp.completed_at,
-        cp.notes,
+        cpool.id,
+        cpool.client_user_id,
+        cpool.invoice_id,
+        cpool.task_id,
+        cpool.service_id,
+        cpool.description,
+        cpool.priority,
+        cpool.status,
+        cpool.added_at,
+        cpool.started_at,
+        cpool.completed_at,
+        cpool.notes,
         client.full_name as client_name,
         client.email as client_email,
         added_by.full_name as added_by_name,
@@ -30,43 +33,52 @@ export const listPoolItems: RequestHandler = async (req: any, res: any) => {
         s.service_name,
         cp_profile.sede,
         cp_profile.grupo
-      FROM client_pool cp
-      JOIN users client ON client.id = cp.client_user_id
-      LEFT JOIN users added_by ON added_by.id = cp.added_by_user_id
-      LEFT JOIN users assigned_to ON assigned_to.id = cp.assigned_to_user_id
-      LEFT JOIN users completed_by ON completed_by.id = cp.completed_by_user_id
-      LEFT JOIN services s ON s.id = cp.service_id
-      LEFT JOIN clients_profiles cp_profile ON cp_profile.user_id = cp.client_user_id
+      FROM client_pool cpool
+      JOIN users client ON client.id = cpool.client_user_id
+      JOIN clients_profiles cp_profile ON cp_profile.user_id = cpool.client_user_id
+      LEFT JOIN users added_by ON added_by.id = cpool.added_by_user_id
+      LEFT JOIN users assigned_to ON assigned_to.id = cpool.assigned_to_user_id
+      LEFT JOIN users completed_by ON completed_by.id = cpool.completed_by_user_id
+      LEFT JOIN services s ON s.id = cpool.service_id
       WHERE 1=1
     `;
 
     const params: any[] = [];
 
+    // Filtrado por workspace
+    if (!isConsolidated && workspaceId) {
+      query += ` AND cp_profile.workspace_id = ?`;
+      params.push(workspaceId);
+    } else if (isConsolidated && accessibleIds.length > 0) {
+      query += ` AND cp_profile.workspace_id IN (${accessibleIds.map(() => '?').join(',')})`;
+      params.push(...accessibleIds);
+    }
+
     if (status) {
-      query += ` AND cp.status = ?`;
+      query += ` AND cpool.status = ?`;
       params.push(status);
     }
 
     if (priority) {
-      query += ` AND cp.priority = ?`;
+      query += ` AND cpool.priority = ?`;
       params.push(priority);
     }
 
     if (assignedTo) {
       if (assignedTo === 'me') {
-        query += ` AND cp.assigned_to_user_id = ?`;
+        query += ` AND cpool.assigned_to_user_id = ?`;
         params.push(req.user.id);
       } else if (assignedTo === 'unassigned') {
-        query += ` AND cp.assigned_to_user_id IS NULL`;
+        query += ` AND cpool.assigned_to_user_id IS NULL`;
       } else if (assignedTo !== 'all') {
-        query += ` AND cp.assigned_to_user_id = ?`;
+        query += ` AND cpool.assigned_to_user_id = ?`;
         params.push(parseInt(assignedTo));
       }
     }
 
     query += ` ORDER BY
-      FIELD(cp.priority, 'urgente', 'alta', 'normal', 'baja'),
-      cp.added_at DESC
+      FIELD(cpool.priority, 'urgente', 'alta', 'normal', 'baja'),
+      cpool.added_at DESC
     `;
 
     const [rows] = await req.db.query(query, params);
@@ -236,36 +248,59 @@ export const cancelPoolItem: RequestHandler = async (req: any, res: any) => {
  * Obtener estadísticas del pool
  */
 export const getPoolStats: RequestHandler = async (req: any, res: any) => {
+  const workspaceId = req.workspaceId;
+  const isConsolidated = req.isConsolidatedView;
+  const accessibleIds = req.accessibleWorkspaceIds || [];
+
+  // Construir filtro de workspace
+  let workspaceFilter = '';
+  const wsParams: any[] = [];
+
+  if (!isConsolidated && workspaceId) {
+    workspaceFilter = 'AND cp_profile.workspace_id = ?';
+    wsParams.push(workspaceId);
+  } else if (isConsolidated && accessibleIds.length > 0) {
+    workspaceFilter = `AND cp_profile.workspace_id IN (${accessibleIds.map(() => '?').join(',')})`;
+    wsParams.push(...accessibleIds);
+  }
+
   try {
     const [statusStats] = await req.db.query(
       `SELECT
-        status,
+        cpool.status,
         COUNT(*) as count
-       FROM client_pool
-       GROUP BY status`
+       FROM client_pool cpool
+       JOIN clients_profiles cp_profile ON cp_profile.user_id = cpool.client_user_id
+       WHERE 1=1 ${workspaceFilter}
+       GROUP BY cpool.status`,
+      wsParams
     );
 
     const [priorityStats] = await req.db.query(
       `SELECT
-        priority,
+        cpool.priority,
         COUNT(*) as count
-       FROM client_pool
-       WHERE status IN ('pending', 'in_progress')
-       GROUP BY priority`
+       FROM client_pool cpool
+       JOIN clients_profiles cp_profile ON cp_profile.user_id = cpool.client_user_id
+       WHERE cpool.status IN ('pending', 'in_progress') ${workspaceFilter}
+       GROUP BY cpool.priority`,
+      wsParams
     );
 
     const [userStats] = await req.db.query(
       `SELECT
         u.id,
         u.full_name,
-        COUNT(CASE WHEN cp.status = 'completed' THEN 1 END) as completed_count,
-        COUNT(CASE WHEN cp.status = 'in_progress' THEN 1 END) as in_progress_count
+        COUNT(CASE WHEN cpool.status = 'completed' THEN 1 END) as completed_count,
+        COUNT(CASE WHEN cpool.status = 'in_progress' THEN 1 END) as in_progress_count
        FROM users u
-       LEFT JOIN client_pool cp ON cp.assigned_to_user_id = u.id
+       LEFT JOIN client_pool cpool ON cpool.assigned_to_user_id = u.id
+       LEFT JOIN clients_profiles cp_profile ON cp_profile.user_id = cpool.client_user_id
        WHERE u.role IN ('admin', 'employee')
-       AND u.is_active = TRUE
+       AND u.is_active = TRUE ${workspaceFilter}
        GROUP BY u.id, u.full_name
-       ORDER BY completed_count DESC`
+       ORDER BY completed_count DESC`,
+      wsParams
     );
 
     res.json({

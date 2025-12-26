@@ -136,12 +136,28 @@ export async function activateClientOmiso(req: Request, res: Response) {
 export async function getMyAssignedClients(req: Request, res: Response) {
   try {
     const userId = (req as any).user.sub;
+    const workspaceId = (req as any).workspaceId;
+    const isConsolidated = (req as any).isConsolidatedView;
+    const accessibleIds = (req as any).accessibleWorkspaceIds || [];
+
     // Siempre usar el mes/año actual del servidor
     const currentDate = new Date();
     const month = currentDate.getMonth() + 1;
     const year = currentDate.getFullYear();
 
-    console.log(`[MY-CLIENTS] Usuario ${userId} consultando clientes para ${month}/${year}`);
+    console.log(`[MY-CLIENTS] Usuario ${userId} consultando clientes para ${month}/${year}, workspace: ${workspaceId}`);
+
+    // Construir filtro de workspace
+    let workspaceFilter = '';
+    const params: any[] = [userId];
+
+    if (!isConsolidated && workspaceId) {
+      workspaceFilter = 'AND cp.workspace_id = ?';
+      params.push(workspaceId);
+    } else if (isConsolidated && accessibleIds.length > 0) {
+      workspaceFilter = `AND cp.workspace_id IN (${accessibleIds.map(() => '?').join(',')})`;
+      params.push(...accessibleIds);
+    }
 
     // Query para obtener clientes asignados con todos sus servicios
     const [clients]: any = await (req as any).db!.query(`
@@ -155,12 +171,13 @@ export async function getMyAssignedClients(req: Request, res: Response) {
         cp.overall_rating,
         cp.notes
       FROM users u
-      LEFT JOIN clients_profiles cp ON cp.user_id = u.id
+      JOIN clients_profiles cp ON cp.user_id = u.id
       WHERE u.role = 'client'
         AND u.assigned_to_user_id = ?
         AND u.is_active = 1
+        ${workspaceFilter}
       ORDER BY u.full_name ASC
-    `, [userId]);
+    `, params);
 
     console.log(`[MY-CLIENTS] Encontrados ${clients.length} clientes asignados`);
 

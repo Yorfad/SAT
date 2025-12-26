@@ -6,6 +6,7 @@ import { z } from "zod";
 import { upload, resolveUploadPath } from "../config/upload";
 import { decrypt } from "../utils/encryption";
 import { listServices, createService } from "../controllers/service.controller";
+import { resolveWorkspace, loadWorkspaceId } from "../middleware/resolveWorkspace";
 import path from "path";
 import fs from "fs";
 import mime from "mime-types";
@@ -13,11 +14,28 @@ import mime from "mime-types";
 
 const router = Router();
 router.use(authenticateToken);
+router.use(resolveWorkspace);
+router.use(loadWorkspaceId);
 router.get("/checklist/pending", requireRoles("admin","employee"), async (req, res) => {
   try {
     const userId = (req as any).user.sub;
+    const workspaceId = req.workspaceId;
+    const isConsolidated = req.isConsolidatedView;
+    const accessibleIds = req.accessibleWorkspaceIds || [];
 
-    // Filtrar tareas SOLO de clientes asignados al usuario logueado
+    // Construir filtro de workspace
+    let workspaceFilter = '';
+    const params: any[] = [userId];
+
+    if (!isConsolidated && workspaceId) {
+      workspaceFilter = 'AND cp.workspace_id = ?';
+      params.push(workspaceId);
+    } else if (isConsolidated && accessibleIds.length > 0) {
+      workspaceFilter = `AND cp.workspace_id IN (${accessibleIds.map(() => '?').join(',')})`;
+      params.push(...accessibleIds);
+    }
+
+    // Filtrar tareas SOLO de clientes asignados al usuario logueado Y del workspace
     const [rows]: any = await req.db!.query(`
       SELECT
         msc.id,
@@ -52,14 +70,16 @@ router.get("/checklist/pending", requireRoles("admin","employee"), async (req, r
       FROM monthly_service_checklist msc
       JOIN monthly_invoices mi ON mi.id = msc.invoice_id
       JOIN users u ON u.id = mi.client_user_id
+      JOIN clients_profiles cp ON cp.user_id = u.id
       LEFT JOIN services s ON s.id = msc.service_id
       WHERE msc.status <> 'completed'
         AND msc.status IS NOT NULL
         AND u.assigned_to_user_id = ?
         AND u.is_active = 1
+        ${workspaceFilter}
       ORDER BY mi.invoice_year DESC, mi.invoice_month DESC, msc.id DESC
       LIMIT 50
-    `, [userId]);
+    `, params);
 
     console.log(`[PENDING-TASKS] Usuario ${userId} tiene ${rows.length} tareas pendientes de sus clientes asignados`);
     res.json(rows || []);

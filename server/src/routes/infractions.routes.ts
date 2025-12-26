@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { authenticateToken } from "../middleware/auth";
 import { requireRoles } from "../middleware/rbac";
+import { resolveWorkspace, loadWorkspaceId } from "../middleware/resolveWorkspace";
 import { validate } from "../middleware/validate";
 import { z } from "zod";
 import {
@@ -13,6 +14,8 @@ import {
 
 const router = Router();
 router.use(authenticateToken);
+router.use(resolveWorkspace);
+router.use(loadWorkspaceId);
 
 // Listar infracciones
 router.get(

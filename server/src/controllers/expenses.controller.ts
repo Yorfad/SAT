@@ -6,6 +6,9 @@ import { RequestHandler } from "express";
  */
 export const listExpenses: RequestHandler = async (req: any, res: any) => {
   const { year, month, type, category, isActive } = req.query;
+  const workspaceId = req.workspaceId;
+  const isConsolidated = req.isConsolidatedView;
+  const accessibleIds = req.accessibleWorkspaceIds || [];
 
   try {
     let query = `
@@ -19,6 +22,8 @@ export const listExpenses: RequestHandler = async (req: any, res: any) => {
         e.expense_year,
         e.category,
         e.is_active,
+        e.is_shared,
+        e.workspace_id,
         e.created_at,
         u.full_name as created_by_name
        FROM expenses e
@@ -27,6 +32,15 @@ export const listExpenses: RequestHandler = async (req: any, res: any) => {
     `;
 
     const params: any[] = [];
+
+    // Filtrado por workspace (incluye shared = true)
+    if (!isConsolidated && workspaceId) {
+      query += ` AND (e.workspace_id = ? OR e.is_shared = TRUE)`;
+      params.push(workspaceId);
+    } else if (isConsolidated && accessibleIds.length > 0) {
+      query += ` AND (e.workspace_id IN (${accessibleIds.map(() => '?').join(',')}) OR e.is_shared = TRUE)`;
+      params.push(...accessibleIds);
+    }
 
     if (year) {
       query += ` AND e.expense_year = ?`;
@@ -69,8 +83,9 @@ export const listExpenses: RequestHandler = async (req: any, res: any) => {
  * Crear un nuevo gasto
  */
 export const createExpense: RequestHandler = async (req: any, res: any) => {
-  const { expenseType, description, amount, expenseDate, category } = req.body;
+  const { expenseType, description, amount, expenseDate, category, isShared } = req.body;
   const createdByUserId = req.user.id;
+  const workspaceId = req.workspaceId;
 
   try {
     const date = new Date(expenseDate);
@@ -79,9 +94,9 @@ export const createExpense: RequestHandler = async (req: any, res: any) => {
 
     const [result]: any = await req.db.query(
       `INSERT INTO expenses
-       (expense_type, description, amount, expense_date, expense_month, expense_year, category, created_by_user_id, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE)`,
-      [expenseType, description, amount, expenseDate, expenseMonth, expenseYear, category || null, createdByUserId]
+       (workspace_id, expense_type, description, amount, expense_date, expense_month, expense_year, category, created_by_user_id, is_active, is_shared)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE, ?)`,
+      [workspaceId, expenseType, description, amount, expenseDate, expenseMonth, expenseYear, category || null, createdByUserId, isShared || false]
     );
 
     res.json({
@@ -174,8 +189,23 @@ export const deleteExpense: RequestHandler = async (req: any, res: any) => {
  */
 export const getExpensesSummary: RequestHandler = async (req: any, res: any) => {
   const { year, month } = req.query;
+  const workspaceId = req.workspaceId;
+  const isConsolidated = req.isConsolidatedView;
+  const accessibleIds = req.accessibleWorkspaceIds || [];
 
   try {
+    // Construir filtro de workspace
+    let workspaceFilter = '';
+    const wsParams: any[] = [];
+
+    if (!isConsolidated && workspaceId) {
+      workspaceFilter = 'AND (workspace_id = ? OR is_shared = TRUE)';
+      wsParams.push(workspaceId);
+    } else if (isConsolidated && accessibleIds.length > 0) {
+      workspaceFilter = `AND (workspace_id IN (${accessibleIds.map(() => '?').join(',')}) OR is_shared = TRUE)`;
+      wsParams.push(...accessibleIds);
+    }
+
     let query = `
       SELECT
         expense_type,
@@ -183,10 +213,10 @@ export const getExpensesSummary: RequestHandler = async (req: any, res: any) => 
         SUM(amount) as total,
         COUNT(*) as count
        FROM expenses
-       WHERE is_active = TRUE
+       WHERE is_active = TRUE ${workspaceFilter}
     `;
 
-    const params: any[] = [];
+    const params: any[] = [...wsParams];
 
     if (year) {
       query += ` AND expense_year = ?`;
@@ -203,14 +233,18 @@ export const getExpensesSummary: RequestHandler = async (req: any, res: any) => 
     const [rows] = await req.db.query(query, params);
 
     // Calcular totales generales
+    const totalsParams = [...wsParams];
+    if (year) totalsParams.push(year);
+    if (month) totalsParams.push(month);
+
     const [totals]: any = await req.db.query(
       `SELECT
         SUM(CASE WHEN expense_type = 'one_time' THEN amount ELSE 0 END) as total_one_time,
         SUM(CASE WHEN expense_type = 'monthly_recurring' THEN amount ELSE 0 END) as total_recurring,
         SUM(amount) as total
        FROM expenses
-       WHERE is_active = TRUE ${year ? 'AND expense_year = ?' : ''} ${month ? 'AND expense_month = ?' : ''}`,
-      params
+       WHERE is_active = TRUE ${workspaceFilter} ${year ? 'AND expense_year = ?' : ''} ${month ? 'AND expense_month = ?' : ''}`,
+      totalsParams
     );
 
     res.json({
@@ -228,12 +262,29 @@ export const getExpensesSummary: RequestHandler = async (req: any, res: any) => 
  * Obtener lista de categorías de gastos
  */
 export const getExpenseCategories: RequestHandler = async (req: any, res: any) => {
+  const workspaceId = req.workspaceId;
+  const isConsolidated = req.isConsolidatedView;
+  const accessibleIds = req.accessibleWorkspaceIds || [];
+
   try {
+    // Construir filtro de workspace
+    let workspaceFilter = '';
+    const params: any[] = [];
+
+    if (!isConsolidated && workspaceId) {
+      workspaceFilter = 'AND (workspace_id = ? OR is_shared = TRUE)';
+      params.push(workspaceId);
+    } else if (isConsolidated && accessibleIds.length > 0) {
+      workspaceFilter = `AND (workspace_id IN (${accessibleIds.map(() => '?').join(',')}) OR is_shared = TRUE)`;
+      params.push(...accessibleIds);
+    }
+
     const [rows] = await req.db.query(
       `SELECT DISTINCT category
        FROM expenses
-       WHERE category IS NOT NULL
-       ORDER BY category ASC`
+       WHERE category IS NOT NULL ${workspaceFilter}
+       ORDER BY category ASC`,
+      params
     );
 
     res.json(rows);

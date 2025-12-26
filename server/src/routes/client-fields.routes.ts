@@ -11,7 +11,9 @@ import {
   reorderClientFields,
   getClientCustomValues,
   saveClientCustomValues,
-  createClient
+  createClient,
+  getTableColumns,
+  syncFieldsWithColumns
 } from "../controllers/client-fields.controller";
 
 const router = Router();
@@ -86,6 +88,22 @@ router.post(
   "/create-client",
   requireRoles("admin"),
   createClient
+);
+
+// ================== COLUMNAS DE TABLA ==================
+
+// Obtener información de columnas de la tabla clients_profiles
+router.get(
+  "/columns",
+  requireRoles("admin"),
+  getTableColumns
+);
+
+// Sincronizar campos con columnas existentes
+router.post(
+  "/sync",
+  requireRoles("admin"),
+  syncFieldsWithColumns
 );
 
 export default router;

@@ -1,12 +1,15 @@
 import { Router } from "express";
 import { authenticateToken } from "../middleware/auth";
 import { requireRoles } from "../middleware/rbac";
+import { resolveWorkspace, loadWorkspaceId } from "../middleware/resolveWorkspace";
 import { validate } from "../middleware/validate";
 import { z } from "zod";
 import { registerPayment, getPendingPayments, getPaymentHistory } from "../controllers/payments.controller";
 
 const router = Router();
 router.use(authenticateToken);
+router.use(resolveWorkspace);
+router.use(loadWorkspaceId);
 
 // Registrar pago de una factura
 router.post(

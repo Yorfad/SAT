@@ -1,13 +1,16 @@
 import { Router } from "express";
 import { authenticateToken } from "../middleware/auth";
 import { requireRoles } from "../middleware/rbac";
+import { resolveWorkspace, loadWorkspaceId } from "../middleware/resolveWorkspace";
 import { getMyAssignedClients, getClientOmisos, activateClientOmiso } from "../controllers/my-clients.controller";
 import { upload } from "../config/upload";
 
 const router = Router();
 
-// Todas las rutas requieren autenticación
+// Todas las rutas requieren autenticación y workspace
 router.use(authenticateToken);
+router.use(resolveWorkspace);
+router.use(loadWorkspaceId);
 
 /**
  * GET /api/my-clients

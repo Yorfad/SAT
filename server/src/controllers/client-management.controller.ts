@@ -6,6 +6,9 @@ import { RequestHandler } from "express";
  */
 export const listClients: RequestHandler = async (req: any, res: any) => {
   const { sede, grupo, assignedTo, isActive, searchTerm } = req.query;
+  const workspaceId = req.workspaceId;
+  const isConsolidated = req.isConsolidatedView;
+  const accessibleIds = req.accessibleWorkspaceIds || [];
 
   try {
     let query = `
@@ -23,14 +26,27 @@ export const listClients: RequestHandler = async (req: any, res: any) => {
         cp.sede,
         cp.grupo,
         cp.overall_rating,
-        cp.active_infractions_count
+        cp.active_infractions_count,
+        cp.workspace_id,
+        w.name as workspace_name,
+        w.color as workspace_color
       FROM users u
       LEFT JOIN users assigned_user ON assigned_user.id = u.assigned_to_user_id
-      LEFT JOIN clients_profiles cp ON cp.user_id = u.id
+      JOIN clients_profiles cp ON cp.user_id = u.id
+      LEFT JOIN workspaces w ON w.id = cp.workspace_id
       WHERE u.role = 'client'
     `;
 
     const params: any[] = [];
+
+    // Filtrado por workspace
+    if (!isConsolidated && workspaceId) {
+      query += ` AND cp.workspace_id = ?`;
+      params.push(workspaceId);
+    } else if (isConsolidated && accessibleIds.length > 0) {
+      query += ` AND cp.workspace_id IN (${accessibleIds.map(() => '?').join(',')})`;
+      params.push(...accessibleIds);
+    }
 
     if (sede) {
       query += ` AND cp.sede = ?`;
@@ -216,13 +232,31 @@ export const updateClientProfile: RequestHandler = async (req: any, res: any) =>
  * Obtener opciones disponibles para filtros (sedes, grupos)
  */
 export const getFilterOptions: RequestHandler = async (req: any, res: any) => {
+  const workspaceId = req.workspaceId;
+  const isConsolidated = req.isConsolidatedView;
+  const accessibleIds = req.accessibleWorkspaceIds || [];
+
   try {
+    // Construir filtro de workspace
+    let workspaceFilter = '';
+    const wsParams: any[] = [];
+
+    if (!isConsolidated && workspaceId) {
+      workspaceFilter = 'AND workspace_id = ?';
+      wsParams.push(workspaceId);
+    } else if (isConsolidated && accessibleIds.length > 0) {
+      workspaceFilter = `AND workspace_id IN (${accessibleIds.map(() => '?').join(',')})`;
+      wsParams.push(...accessibleIds);
+    }
+
     const [sedes] = await req.db.query(
-      `SELECT DISTINCT sede FROM clients_profiles WHERE sede IS NOT NULL ORDER BY sede ASC`
+      `SELECT DISTINCT sede FROM clients_profiles WHERE sede IS NOT NULL ${workspaceFilter} ORDER BY sede ASC`,
+      wsParams
     );
 
     const [grupos] = await req.db.query(
-      `SELECT DISTINCT grupo FROM clients_profiles WHERE grupo IS NOT NULL ORDER BY grupo ASC`
+      `SELECT DISTINCT grupo FROM clients_profiles WHERE grupo IS NOT NULL ${workspaceFilter} ORDER BY grupo ASC`,
+      wsParams
     );
 
     const [employees] = await req.db.query(

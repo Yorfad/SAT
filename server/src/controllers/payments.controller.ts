@@ -48,9 +48,25 @@ export const registerPayment: RequestHandler = async (req: any, res: any) => {
  * Obtener facturas pendientes de pago para el mes actual
  */
 export const getPendingPayments: RequestHandler = async (req: any, res: any) => {
+  const workspaceId = req.workspaceId;
+  const isConsolidated = req.isConsolidatedView;
+  const accessibleIds = req.accessibleWorkspaceIds || [];
+
   try {
     const currentMonth = new Date().getMonth() + 1;
     const currentYear = new Date().getFullYear();
+
+    // Construir filtro de workspace
+    let workspaceFilter = '';
+    const params: any[] = [currentYear, currentMonth];
+
+    if (!isConsolidated && workspaceId) {
+      workspaceFilter = 'AND cp.workspace_id = ?';
+      params.push(workspaceId);
+    } else if (isConsolidated && accessibleIds.length > 0) {
+      workspaceFilter = `AND cp.workspace_id IN (${accessibleIds.map(() => '?').join(',')})`;
+      params.push(...accessibleIds);
+    }
 
     const [rows] = await req.db.query(
       `SELECT
@@ -69,11 +85,12 @@ export const getPendingPayments: RequestHandler = async (req: any, res: any) => 
         cp.active_infractions_count
        FROM monthly_invoices mi
        JOIN users u ON u.id = mi.client_user_id
-       LEFT JOIN clients_profiles cp ON cp.user_id = mi.client_user_id
+       JOIN clients_profiles cp ON cp.user_id = mi.client_user_id
        WHERE mi.invoice_year = ? AND mi.invoice_month = ?
        AND mi.payment_status IN ('pending', 'partial', 'overdue')
+       ${workspaceFilter}
        ORDER BY mi.due_date ASC, u.full_name ASC`,
-      [currentYear, currentMonth]
+      params
     );
 
     res.json(rows);

@@ -13,15 +13,30 @@ export async function getBrigadeBoard(req: Request, res: Response) {
   const year = Number(req.query.year) || new Date().getFullYear();
   const month = Number(req.query.month) || (new Date().getMonth() + 1);
 
-  // 1) clientes activos
+  const workspaceId = (req as any).workspaceId;
+  const isConsolidated = (req as any).isConsolidatedView;
+  const accessibleIds = (req as any).accessibleWorkspaceIds || [];
+
+  // Construir filtro de workspace
+  let workspaceFilter = '';
+  const wsParams: any[] = [];
+
+  if (!isConsolidated && workspaceId) {
+    workspaceFilter = 'AND cp.workspace_id = ?';
+    wsParams.push(workspaceId);
+  } else if (isConsolidated && accessibleIds.length > 0) {
+    workspaceFilter = `AND cp.workspace_id IN (${accessibleIds.map(() => '?').join(',')})`;
+    wsParams.push(...accessibleIds);
+  }
+
+  // 1) clientes activos filtrados por workspace
   const [clients]: any = await db.query(`
-    SELECT c.id as client_id, u.name as client_name, cp.nit, cp.sat_password
-    FROM clients c
-    JOIN users u ON u.id = c.user_id
-    LEFT JOIN clients_profiles cp ON cp.client_id = c.id
-    WHERE c.is_active = 1
-    ORDER BY u.name ASC
-  `);
+    SELECT u.id as client_id, u.full_name as client_name, cp.nit, cp.sat_password
+    FROM users u
+    JOIN clients_profiles cp ON cp.user_id = u.id
+    WHERE u.role = 'client' AND u.is_active = 1 ${workspaceFilter}
+    ORDER BY u.full_name ASC
+  `, wsParams);
 
   // 2) invoices del mes
   const [invoices]: any = await db.query(`

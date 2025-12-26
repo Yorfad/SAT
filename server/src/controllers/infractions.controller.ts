@@ -6,6 +6,9 @@ import { RequestHandler } from "express";
  */
 export const listInfractions: RequestHandler = async (req: any, res: any) => {
   const { clientId, isActive } = req.query;
+  const workspaceId = req.workspaceId;
+  const isConsolidated = req.isConsolidatedView;
+  const accessibleIds = req.accessibleWorkspaceIds || [];
 
   try {
     let query = `
@@ -27,6 +30,7 @@ export const listInfractions: RequestHandler = async (req: any, res: any) => {
         ci.resolution_notes
        FROM client_infractions ci
        JOIN users u ON u.id = ci.client_user_id
+       JOIN clients_profiles cp ON cp.user_id = ci.client_user_id
        LEFT JOIN monthly_invoices mi ON mi.id = ci.related_invoice_id
        LEFT JOIN users creator ON creator.id = ci.created_by_user_id
        LEFT JOIN users resolver ON resolver.id = ci.resolved_by_user_id
@@ -34,6 +38,15 @@ export const listInfractions: RequestHandler = async (req: any, res: any) => {
     `;
 
     const params: any[] = [];
+
+    // Filtrado por workspace
+    if (!isConsolidated && workspaceId) {
+      query += ` AND cp.workspace_id = ?`;
+      params.push(workspaceId);
+    } else if (isConsolidated && accessibleIds.length > 0) {
+      query += ` AND cp.workspace_id IN (${accessibleIds.map(() => '?').join(',')})`;
+      params.push(...accessibleIds);
+    }
 
     if (clientId) {
       query += ` AND ci.client_user_id = ?`;
