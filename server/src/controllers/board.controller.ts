@@ -31,7 +31,7 @@ export async function getBrigadeBoard(req: Request, res: Response) {
 
   // 1) clientes activos filtrados por workspace
   const [clients]: any = await db.query(`
-    SELECT u.id as client_id, u.full_name as client_name, cp.nit, cp.sat_password
+    SELECT u.id as client_id, u.full_name as client_name, u.nit, cp.sat_password_encrypted as sat_password
     FROM users u
     JOIN clients_profiles cp ON cp.user_id = u.id
     WHERE u.role = 'client' AND u.is_active = 1 ${workspaceFilter}
@@ -40,7 +40,7 @@ export async function getBrigadeBoard(req: Request, res: Response) {
 
   // 2) invoices del mes
   const [invoices]: any = await db.query(`
-    SELECT mi.id as invoice_id, mi.client_id,
+    SELECT mi.id as invoice_id, mi.client_user_id as client_id,
            mi.invoice_year, mi.invoice_month,
            mi.total_due, mi.amount_paid, mi.balance, mi.payment_status,
            mi.observations
@@ -50,7 +50,7 @@ export async function getBrigadeBoard(req: Request, res: Response) {
 
   // 3) artefactos de factura / rectificador por invoice
   const [artifacts]: any = await db.query(`
-    SELECT ia.invoice_id, ia.kind
+    SELECT ia.invoice_id, ia.artifact_type as kind
     FROM invoice_artifacts ia
     JOIN monthly_invoices mi ON mi.id = ia.invoice_id
     WHERE mi.invoice_year = ? AND mi.invoice_month = ?
@@ -58,11 +58,12 @@ export async function getBrigadeBoard(req: Request, res: Response) {
 
   // 4) checklist de servicios del mes
   const [checklist]: any = await db.query(`
-    SELECT msc.id, msc.client_id, msc.service_id, msc.status, s.name AS service_name
+    SELECT msc.id, mi.client_user_id as client_id, msc.service_id, msc.status, s.service_name AS service_name
     FROM monthly_service_checklist msc
+    JOIN monthly_invoices mi ON mi.id = msc.invoice_id
     JOIN services s ON s.id = msc.service_id
-    WHERE msc.year = ? AND msc.month = ?
-    ORDER BY s.name
+    WHERE mi.invoice_year = ? AND mi.invoice_month = ?
+    ORDER BY s.service_name
   `, [year, month]);
 
   // Indexaciones rápidas
