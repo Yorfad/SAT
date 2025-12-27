@@ -78,11 +78,12 @@ function shouldActivateService(service: Service, currentDate: Date): { should: b
       if (dayOfMonth <= windowEnd) {
         return { should: true, targetMonth: currentMonth, targetYear: currentYear };
       }
-      // Estamos en los últimos días del mes anterior
-      const daysInPreviousMonth = new Date(currentYear, currentMonth - 1, 0).getDate();
-      const previousMonthWindowStart = daysInPreviousMonth + windowStart; // ej: 30 + (-2) = 28
+      // Estamos en los últimos días del mes ACTUAL, preparando tarea del mes siguiente
+      // Usar días del mes ACTUAL (no el anterior)
+      const daysInCurrentMonth = new Date(currentYear, currentMonth, 0).getDate();
+      const currentMonthWindowStart = daysInCurrentMonth + windowStart; // ej: 31 + (-2) = 29
 
-      if (dayOfMonth >= previousMonthWindowStart) {
+      if (dayOfMonth >= currentMonthWindowStart) {
         // Activar para el mes siguiente
         const nextMonth = currentMonth === 12 ? 1 : currentMonth + 1;
         const nextYear = currentMonth === 12 ? currentYear + 1 : currentYear;
@@ -143,6 +144,13 @@ function shouldActivateService(service: Service, currentDate: Date): { should: b
 export async function processMonthlyTasks(tenantSlug: string) {
   const db = getPoolForTenantSlug(tenantSlug);
   const currentDate = new Date();
+  const dayOfMonth = currentDate.getDate();
+  const currentMonth = currentDate.getMonth() + 1;
+  const currentYear = currentDate.getFullYear();
+
+  console.log(`\n[${tenantSlug}] ════════════════════════════════════════`);
+  console.log(`[${tenantSlug}] Scheduler ejecutándose: ${dayOfMonth}/${currentMonth}/${currentYear}`);
+  console.log(`[${tenantSlug}] ════════════════════════════════════════`);
 
   try {
     // 1. Obtener todos los servicios activos (excluyendo variables y bajo demanda)
@@ -156,13 +164,24 @@ export async function processMonthlyTasks(tenantSlug: string) {
         AND (recurrence_type_extended IS NULL OR recurrence_type_extended NOT IN ('variable', 'on_demand'))
     `);
 
-    console.log(`[${tenantSlug}] Procesando ${services.length} servicios activos`);
+    console.log(`[${tenantSlug}] Servicios activos encontrados: ${services.length}`);
 
     // 2. Para cada servicio, verificar si debe activarse hoy
+    let servicesChecked = 0;
+    let servicesActivated = 0;
+    let totalTasksActivated = 0;
+
     for (const service of services as Service[]) {
+      servicesChecked++;
       const { should, targetMonth, targetYear } = shouldActivateService(service, currentDate);
 
+      // Log detallado de cada servicio
+      const windowInfo = service.activation_day
+        ? `día ${service.activation_day} (ventana: ${service.activation_window_days} días)`
+        : 'sin día fijo';
+
       if (should) {
+        servicesActivated++;
         // Marcar todas las tareas de este servicio como pendientes para el mes objetivo
         const result: any = await db.query(`
           UPDATE monthly_service_checklist msc
@@ -175,20 +194,30 @@ export async function processMonthlyTasks(tenantSlug: string) {
         `, [targetYear, targetMonth, service.id]);
 
         if (result[0].affectedRows > 0) {
+          totalTasksActivated += result[0].affectedRows;
           console.log(
-            `[${tenantSlug}] Activadas ${result[0].affectedRows} tareas de "${service.service_name}" ` +
-            `para ${targetMonth}/${targetYear}`
+            `[${tenantSlug}] ✓ "${service.service_name}" (${service.recurrence_type}, ${windowInfo}): ` +
+            `${result[0].affectedRows} tareas activadas para ${targetMonth}/${targetYear}`
+          );
+        } else {
+          console.log(
+            `[${tenantSlug}] ○ "${service.service_name}": En ventana pero sin tareas pendientes`
           );
         }
       }
     }
 
+    console.log(`[${tenantSlug}] ────────────────────────────────────────`);
+    console.log(`[${tenantSlug}] Resumen: ${servicesActivated}/${servicesChecked} servicios en ventana`);
+    console.log(`[${tenantSlug}] Total tareas activadas: ${totalTasksActivated}`);
+
     // 3. Procesar servicios con fecha determinada al completar (ej: libros)
     await processCompletionDeterminedServices(tenantSlug, db, currentDate);
 
-    console.log(`[${tenantSlug}] Procesamiento de tareas completado`);
+    console.log(`[${tenantSlug}] ════════════════════════════════════════`);
+    console.log(`[${tenantSlug}] ✓ Procesamiento completado\n`);
   } catch (error: any) {
-    console.error(`[${tenantSlug}] Error procesando tareas:`, error.message);
+    console.error(`[${tenantSlug}] ✗ ERROR: ${error.message}`);
   }
 }
 
@@ -203,6 +232,10 @@ async function processCompletionDeterminedServices(tenantSlug: string, db: any, 
     WHERE is_active = TRUE
       AND completion_determines_next = TRUE
   `);
+
+  if (services.length > 0) {
+    console.log(`[${tenantSlug}] Procesando ${services.length} servicios con fecha variable (ej: Libros)`);
+  }
 
   for (const service of services) {
     const windowDays = service.activation_window_days || 60;
