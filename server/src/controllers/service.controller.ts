@@ -213,38 +213,26 @@ export async function createService(req: Request, res: Response) {
 
 /**
  * PUT /services/:id
- * Actualiza un servicio completo
+ * Actualiza un servicio (parcial o completo)
  */
 export async function updateService(req: Request, res: Response) {
   try {
     const { id } = req.params;
-    const {
-      service_name,
-      description,
-      default_price,
-      operational_cost,
-      recurrence_type,
-      recurrence_type_extended,
-      recurrence_days,
-      activation_day,
-      activation_window_days,
-      requires_file,
-      file_config,
-      completion_determines_next,
-      is_on_request,
-      is_active,
-      employee_notes,
-      client_notes,
-      assignment_type,
-      visible_to_clients,
-      allow_subscription
-    } = req.body;
+    const body = req.body;
 
     // Verificar que el servicio existe
-    const [existing]: any = await req.db!.query('SELECT id FROM services WHERE id = ?', [id]);
+    const [existing]: any = await req.db!.query('SELECT * FROM services WHERE id = ?', [id]);
     if (!existing || existing.length === 0) {
       return res.status(404).json({ message: 'Servicio no encontrado' });
     }
+
+    const currentService = existing[0];
+
+    // Merge: valores del body sobrescriben los actuales
+    const completion_determines_next = body.completion_determines_next ?? currentService.completion_determines_next;
+    const activation_day = body.activation_day !== undefined ? body.activation_day : currentService.activation_day;
+    const recurrence_type = body.recurrence_type ?? currentService.recurrence_type;
+    const recurrence_days = body.recurrence_days !== undefined ? body.recurrence_days : currentService.recurrence_days;
 
     // Validaciones
     if (completion_determines_next && activation_day !== null) {
@@ -259,50 +247,36 @@ export async function updateService(req: Request, res: Response) {
       });
     }
 
+    // Campos actualizables
+    const updatableFields = [
+      'service_name', 'description', 'default_price', 'operational_cost',
+      'recurrence_type', 'recurrence_type_extended', 'recurrence_days',
+      'activation_day', 'activation_window_days', 'requires_file', 'file_config',
+      'completion_determines_next', 'is_on_request', 'is_active',
+      'employee_notes', 'client_notes', 'assignment_type',
+      'visible_to_clients', 'allow_subscription'
+    ];
+
+    // Construir UPDATE dinámico solo con campos proporcionados
+    const setClauses: string[] = [];
+    const values: any[] = [];
+
+    for (const field of updatableFields) {
+      if (body[field] !== undefined) {
+        setClauses.push(`${field} = ?`);
+        values.push(body[field]);
+      }
+    }
+
+    if (setClauses.length === 0) {
+      return res.status(400).json({ message: 'No hay campos para actualizar' });
+    }
+
+    values.push(id);
+
     await req.db!.query(
-      `UPDATE services SET
-        service_name = ?,
-        description = ?,
-        default_price = ?,
-        operational_cost = ?,
-        recurrence_type = ?,
-        recurrence_type_extended = ?,
-        recurrence_days = ?,
-        activation_day = ?,
-        activation_window_days = ?,
-        requires_file = ?,
-        file_config = ?,
-        completion_determines_next = ?,
-        is_on_request = ?,
-        is_active = ?,
-        employee_notes = ?,
-        client_notes = ?,
-        assignment_type = ?,
-        visible_to_clients = ?,
-        allow_subscription = ?
-      WHERE id = ?`,
-      [
-        service_name,
-        description,
-        default_price,
-        operational_cost,
-        recurrence_type,
-        recurrence_type_extended,
-        recurrence_days,
-        activation_day,
-        activation_window_days,
-        requires_file,
-        file_config,
-        completion_determines_next,
-        is_on_request,
-        is_active,
-        employee_notes,
-        client_notes,
-        assignment_type,
-        visible_to_clients,
-        allow_subscription,
-        id
-      ]
+      `UPDATE services SET ${setClauses.join(', ')} WHERE id = ?`,
+      values
     );
 
     res.json({ message: 'Servicio actualizado exitosamente' });

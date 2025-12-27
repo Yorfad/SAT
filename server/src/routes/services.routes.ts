@@ -685,18 +685,18 @@ router.post("/", requireRoles("admin"), validate(z.object({ body: z.object({
   is_active: z.boolean().optional()
 }) })), createService);
 
-// PUT /services/:id - Actualizar servicio completo
+// PUT /services/:id - Actualizar servicio (parcial o completo)
 router.put("/:id", requireRoles("admin"), validate(z.object({ body: z.object({
-  service_name: z.string().min(2),
+  service_name: z.string().min(2).optional(),
   description: z.string().optional().nullable(),
-  default_price: z.number().nonnegative(),
-  recurrence_type: z.enum(['monthly', 'bimonthly', 'quarterly', 'annual', 'custom', 'one_time']),
+  default_price: z.number().nonnegative().optional(),
+  recurrence_type: z.enum(['monthly', 'bimonthly', 'quarterly', 'annual', 'custom', 'one_time']).optional(),
   recurrence_days: z.number().optional().nullable(),
   activation_day: z.number().min(1).max(31).optional().nullable(),
-  activation_window_days: z.number().min(1).max(30),
-  requires_file: z.boolean(),
-  completion_determines_next: z.boolean(),
-  is_active: z.boolean()
+  activation_window_days: z.number().min(1).max(30).optional(),
+  requires_file: z.boolean().optional(),
+  completion_determines_next: z.boolean().optional(),
+  is_active: z.boolean().optional()
 }) })), updateService);
 
 // PATCH /services/:id/status - Activar/desactivar servicio
