@@ -93,18 +93,44 @@ router.get("/checklist/pending", requireRoles("admin","employee"), async (req, r
 router.get("/checklist/my-tasks", requireRoles("admin","employee"), async (req, res) => {
   try {
     const userId = (req as any).user.sub;
-    const { filter } = req.query; // 'all' | 'pending' | 'completed'
+    const { filter, search, serviceId, month, year } = req.query;
 
-    // Query con campo is_editable calculado
-    // Una tarea es editable si:
-    // 1. Está pendiente (siempre editable)
-    // 2. Está completada Y no existe una tarea más reciente del mismo servicio/cliente
-    let statusFilter = '';
+    // Construir filtros dinámicos
+    const filters: string[] = [];
+    const params: any[] = [userId];
+
+    // Filtro por estado
     if (filter === 'pending') {
-      statusFilter = "AND msc.status <> 'completed'";
+      filters.push("msc.status <> 'completed'");
     } else if (filter === 'completed') {
-      statusFilter = "AND msc.status = 'completed'";
+      filters.push("msc.status = 'completed'");
     }
+
+    // Búsqueda por nombre de cliente
+    if (search && typeof search === 'string' && search.trim()) {
+      filters.push("u.full_name LIKE ?");
+      params.push(`%${search.trim()}%`);
+    }
+
+    // Filtro por servicio
+    if (serviceId && !isNaN(Number(serviceId))) {
+      filters.push("msc.service_id = ?");
+      params.push(Number(serviceId));
+    }
+
+    // Filtro por mes
+    if (month && !isNaN(Number(month))) {
+      filters.push("mi.invoice_month = ?");
+      params.push(Number(month));
+    }
+
+    // Filtro por año
+    if (year && !isNaN(Number(year))) {
+      filters.push("mi.invoice_year = ?");
+      params.push(Number(year));
+    }
+
+    const additionalFilters = filters.length > 0 ? 'AND ' + filters.join(' AND ') : '';
 
     const [rows]: any = await req.db!.query(`
       SELECT
@@ -160,7 +186,7 @@ router.get("/checklist/my-tasks", requireRoles("admin","employee"), async (req, 
       WHERE msc.status IS NOT NULL
         AND u.assigned_to_user_id = ?
         AND u.is_active = 1
-        ${statusFilter}
+        ${additionalFilters}
       ORDER BY
         msc.status = 'completed' ASC,
         mi.invoice_year DESC,
@@ -169,7 +195,15 @@ router.get("/checklist/my-tasks", requireRoles("admin","employee"), async (req, 
       LIMIT 100
     `, [userId]);
 
-    console.log(`[MY-TASKS] Usuario ${userId} tiene ${rows.length} tareas (filter: ${filter || 'all'})`);
+    const filterInfo = [
+      filter ? `estado:${filter}` : null,
+      search ? `buscar:"${search}"` : null,
+      serviceId ? `servicio:${serviceId}` : null,
+      month ? `mes:${month}` : null,
+      year ? `año:${year}` : null
+    ].filter(Boolean).join(', ') || 'sin filtros';
+
+    console.log(`[MY-TASKS] Usuario ${userId} tiene ${rows.length} tareas (${filterInfo})`);
     res.json(rows || []);
   } catch (error: any) {
     console.error('Error fetching my tasks:', error);

@@ -7,6 +7,7 @@
 
 import { getPoolForTenantSlug } from '../config/database';
 import { env } from '../config/env';
+import { sendTaskReminderEmail } from '../services/email.service';
 
 interface Service {
   id: number;
@@ -258,7 +259,14 @@ async function processCompletionDeterminedServices(tenantSlug: string, db: any, 
 
     if (reminders && reminders.length > 0) {
       for (const reminder of reminders) {
-        await sendTaskReminderEmail(tenantSlug, reminder, db);
+        // Mapear propiedades de DB a interfaz TaskReminder
+        const taskReminder: TaskReminder = {
+          taskId: reminder.task_id,
+          clientName: reminder.client_name,
+          taskName: reminder.task_name,
+          daysUntil: reminder.days_until
+        };
+        await sendReminderEmailToStaff(tenantSlug, taskReminder, db);
       }
     }
 
@@ -284,9 +292,9 @@ async function processCompletionDeterminedServices(tenantSlug: string, db: any, 
 }
 
 /**
- * Envía recordatorio por email (placeholder - implementar con nodemailer)
+ * Envía recordatorio por email usando el servicio de email
  */
-async function sendTaskReminderEmail(
+async function sendReminderEmailToStaff(
   tenantSlug: string,
   reminder: TaskReminder,
   db: any
@@ -297,16 +305,30 @@ async function sendTaskReminderEmail(
     WHERE role IN ('admin', 'employee') AND is_active = 1
   `);
 
-  // TODO: Implementar envío real de email
-  // Por ahora solo log
-  console.log(`[${tenantSlug}] Recordatorio de tarea:`);
+  if (!users || users.length === 0) {
+    console.log(`[${tenantSlug}] No hay usuarios para notificar`);
+    return;
+  }
+
+  const emails = users.map((u: any) => u.email);
+
+  console.log(`[${tenantSlug}] 📧 Enviando recordatorio:`);
   console.log(`  Cliente: ${reminder.clientName}`);
   console.log(`  Tarea: ${reminder.taskName}`);
   console.log(`  Días hasta vencimiento: ${reminder.daysUntil}`);
-  console.log(`  Enviar a: ${users.map((u: any) => u.email).join(', ')}`);
 
-  // Aquí implementarías el envío real con nodemailer o similar
-  // await sendEmail(...)
+  const result = await sendTaskReminderEmail(
+    emails,
+    reminder.clientName,
+    reminder.taskName,
+    reminder.daysUntil
+  );
+
+  if (result.success) {
+    console.log(`[${tenantSlug}] ✓ Email enviado a: ${emails.join(', ')}`);
+  } else {
+    console.log(`[${tenantSlug}] ✗ Error enviando email`);
+  }
 }
 
 /**

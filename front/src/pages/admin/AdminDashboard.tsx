@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import api from "../../lib/api";
 import { ResponsiveContainer, PieChart, Pie, Cell, Legend, Tooltip } from "recharts";
 import { money } from "../../utils/format";
@@ -33,9 +34,16 @@ type Summary = {
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
 export default function AdminDashboard(){
+  const navigate = useNavigate();
   const currentDate = new Date();
   const [selectedYear, setSelectedYear] = useState(currentDate.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(currentDate.getMonth() + 1);
+
+  // Stats generales de tareas
+  const { data: taskStats } = useQuery({
+    queryKey:["task-stats"],
+    queryFn: async ()=> (await api.get('/stats')).data
+  });
 
   const { data } = useQuery({
     queryKey:["admin-summary", selectedYear, selectedMonth],
@@ -68,6 +76,73 @@ export default function AdminDashboard(){
 
   return (
     <div className="p-6 space-y-6">
+      {/* Resumen de Tareas */}
+      {taskStats && (
+        <div className="bg-gradient-to-r from-slate-800 to-slate-900 border border-slate-700 rounded-xl shadow-lg p-6">
+          <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+            <svg className="w-6 h-6 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+            </svg>
+            Estado de Tareas
+          </h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+            <div
+              className="bg-slate-900/50 rounded-lg p-4 border border-slate-700 cursor-pointer hover:border-orange-500 transition-colors"
+              onClick={() => navigate('/admin/tasks')}
+            >
+              <p className="text-2xl font-bold text-orange-400">{taskStats.pendingTasks}</p>
+              <p className="text-sm text-slate-400">Pendientes</p>
+            </div>
+            <div
+              className="bg-slate-900/50 rounded-lg p-4 border border-slate-700 cursor-pointer hover:border-green-500 transition-colors"
+              onClick={() => navigate('/admin/historial')}
+            >
+              <p className="text-2xl font-bold text-green-400">{taskStats.completedThisMonth}</p>
+              <p className="text-sm text-slate-400">Completadas (mes)</p>
+            </div>
+            <div className="bg-slate-900/50 rounded-lg p-4 border border-slate-700">
+              <p className="text-2xl font-bold text-blue-400">{taskStats.totalThisMonth}</p>
+              <p className="text-sm text-slate-400">Total del mes</p>
+            </div>
+            <div className="bg-slate-900/50 rounded-lg p-4 border border-slate-700">
+              <p className={`text-2xl font-bold ${taskStats.overdueTasks > 0 ? 'text-red-400' : 'text-green-400'}`}>
+                {taskStats.overdueTasks}
+              </p>
+              <p className="text-sm text-slate-400">Vencidas</p>
+            </div>
+            <div
+              className="bg-slate-900/50 rounded-lg p-4 border border-slate-700 cursor-pointer hover:border-blue-500 transition-colors"
+              onClick={() => navigate('/admin/clients')}
+            >
+              <p className="text-2xl font-bold text-slate-200">{taskStats.totalClients}</p>
+              <p className="text-sm text-slate-400">Clientes activos</p>
+            </div>
+            <div className="bg-slate-900/50 rounded-lg p-4 border border-slate-700">
+              <p className="text-2xl font-bold text-purple-400">{taskStats.activeServices}</p>
+              <p className="text-sm text-slate-400">Servicios activos</p>
+            </div>
+          </div>
+
+          {/* Progreso del mes */}
+          {taskStats.totalThisMonth > 0 && (
+            <div className="mt-4">
+              <div className="flex justify-between text-sm mb-1">
+                <span className="text-slate-400">Progreso del mes</span>
+                <span className="text-slate-300">
+                  {Math.round((taskStats.completedThisMonth / taskStats.totalThisMonth) * 100)}%
+                </span>
+              </div>
+              <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-orange-500 to-green-500 transition-all duration-500"
+                  style={{ width: `${(taskStats.completedThisMonth / taskStats.totalThisMonth) * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="flex items-center justify-between flex-wrap gap-4">
         <h1 className="text-2xl font-semibold text-white">Dashboard Financiero</h1>
 

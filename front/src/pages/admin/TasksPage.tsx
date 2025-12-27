@@ -1,5 +1,5 @@
 // src/pages/admin/TasksPage.tsx
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import api from '../../lib/api'
@@ -12,15 +12,63 @@ const TABS: { id: FilterType; label: string }[] = [
   { id: 'all', label: 'Todas' },
 ];
 
+// Meses para el filtro
+const MONTHS = [
+  { value: '', label: 'Todos los meses' },
+  { value: '1', label: 'Enero' },
+  { value: '2', label: 'Febrero' },
+  { value: '3', label: 'Marzo' },
+  { value: '4', label: 'Abril' },
+  { value: '5', label: 'Mayo' },
+  { value: '6', label: 'Junio' },
+  { value: '7', label: 'Julio' },
+  { value: '8', label: 'Agosto' },
+  { value: '9', label: 'Septiembre' },
+  { value: '10', label: 'Octubre' },
+  { value: '11', label: 'Noviembre' },
+  { value: '12', label: 'Diciembre' },
+];
+
 export default function TasksPage() {
   const navigate = useNavigate()
   const [filter, setFilter] = useState<FilterType>('pending')
+  const [search, setSearch] = useState('')
+  const [serviceFilter, setServiceFilter] = useState('')
+  const [monthFilter, setMonthFilter] = useState('')
+  const [yearFilter, setYearFilter] = useState('')
+
+  // Debounce para búsqueda
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  useMemo(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  // Obtener lista de servicios para el dropdown
+  const { data: services } = useQuery({
+    queryKey: ['services-list'],
+    queryFn: async () => {
+      const response = await api.get('/services');
+      return response.data || [];
+    }
+  });
+
+  // Construir query params
+  const queryParams = useMemo(() => {
+    const params = new URLSearchParams();
+    params.set('filter', filter);
+    if (debouncedSearch) params.set('search', debouncedSearch);
+    if (serviceFilter) params.set('serviceId', serviceFilter);
+    if (monthFilter) params.set('month', monthFilter);
+    if (yearFilter) params.set('year', yearFilter);
+    return params.toString();
+  }, [filter, debouncedSearch, serviceFilter, monthFilter, yearFilter]);
 
   const { data, isLoading, error, isError } = useQuery({
-    queryKey: ['my-tasks', filter],
+    queryKey: ['my-tasks', queryParams],
     queryFn: async () => {
       try {
-        const response = await api.get(`/services/checklist/my-tasks?filter=${filter}`);
+        const response = await api.get(`/services/checklist/my-tasks?${queryParams}`);
         return response.data || [];
       } catch (err: any) {
         console.error('Error fetching tasks:', err);
@@ -63,6 +111,78 @@ export default function TasksPage() {
             {tab.label}
           </button>
         ))}
+      </div>
+
+      {/* Filtros avanzados */}
+      <div className="flex flex-wrap gap-3 mb-4">
+        {/* Búsqueda por cliente */}
+        <div className="relative">
+          <input
+            type="text"
+            placeholder="Buscar cliente..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-48 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-200 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+          />
+          {search && (
+            <button
+              onClick={() => setSearch('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+            >
+              ×
+            </button>
+          )}
+        </div>
+
+        {/* Filtro por servicio */}
+        <select
+          value={serviceFilter}
+          onChange={(e) => setServiceFilter(e.target.value)}
+          className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+        >
+          <option value="">Todos los servicios</option>
+          {services?.map((s: any) => (
+            <option key={s.id} value={s.id}>{s.service_name}</option>
+          ))}
+        </select>
+
+        {/* Filtro por mes */}
+        <select
+          value={monthFilter}
+          onChange={(e) => setMonthFilter(e.target.value)}
+          className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+        >
+          {MONTHS.map(m => (
+            <option key={m.value} value={m.value}>{m.label}</option>
+          ))}
+        </select>
+
+        {/* Filtro por año */}
+        <select
+          value={yearFilter}
+          onChange={(e) => setYearFilter(e.target.value)}
+          className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+        >
+          <option value="">Todos los años</option>
+          {[2024, 2025, 2026].map(y => (
+            <option key={y} value={y}>{y}</option>
+          ))}
+        </select>
+
+        {/* Botón limpiar filtros */}
+        {(search || serviceFilter || monthFilter || yearFilter) && (
+          <button
+            onClick={() => {
+              setSearch('');
+              setServiceFilter('');
+              setMonthFilter('');
+              setYearFilter('');
+            }}
+            className="px-3 py-2 bg-slate-600 hover:bg-slate-500 rounded-lg text-slate-300 text-sm transition-colors"
+          >
+            Limpiar filtros
+          </button>
+        )}
       </div>
 
       {tasks.length === 0 ? (
