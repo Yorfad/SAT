@@ -91,8 +91,8 @@ export const filterClients: RequestHandler = async (req: any, res: any) => {
         u.full_name,
         u.email,
         u.nit,
-        u.phone_number,
         u.is_active,
+        cp.phone_number,
         cp.workspace_id,
         w.name as workspace_name,
         w.color as workspace_color
@@ -118,8 +118,8 @@ export const filterClients: RequestHandler = async (req: any, res: any) => {
 
         if (!field || !operator || value === undefined || value === '') continue;
 
-        // Campos de usuario
-        if (['full_name', 'email', 'nit', 'phone_number'].includes(field)) {
+        // Campos de usuario (users table)
+        if (['full_name', 'email', 'nit'].includes(field)) {
           switch (operator) {
             case 'contains':
               conditions.push(`u.${field} LIKE ?`);
@@ -131,6 +131,24 @@ export const filterClients: RequestHandler = async (req: any, res: any) => {
               break;
             case 'starts_with':
               conditions.push(`u.${field} LIKE ?`);
+              params.push(`${value}%`);
+              break;
+          }
+        }
+
+        // phone_number está en clients_profiles
+        if (field === 'phone_number') {
+          switch (operator) {
+            case 'contains':
+              conditions.push(`cp.phone_number LIKE ?`);
+              params.push(`%${value}%`);
+              break;
+            case 'equals':
+              conditions.push(`cp.phone_number = ?`);
+              params.push(value);
+              break;
+            case 'starts_with':
+              conditions.push(`cp.phone_number LIKE ?`);
               params.push(`${value}%`);
               break;
           }

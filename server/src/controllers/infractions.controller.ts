@@ -79,14 +79,18 @@ export const createInfraction: RequestHandler = async (req: any, res: any) => {
   const workspaceId = req.workspaceId;
 
   try {
-    // Obtener el límite de infracciones del workspace
-    let maxInfractions = 3; // default
+    // Obtener configuración del workspace
+    let maxInfractions = 3;
+    let autoDeactivate = true;
+
     if (workspaceId) {
       const [wsRows]: any = await req.db.query(
-        'SELECT max_infractions FROM workspaces WHERE id = ?',
+        'SELECT max_infractions, auto_deactivate_on_limit FROM workspaces WHERE id = ?',
         [workspaceId]
       );
       maxInfractions = wsRows[0]?.max_infractions || 3;
+      // La BD devuelve 0 o 1, convertimos a boolean (0 = false, 1 = true)
+      autoDeactivate = wsRows[0]?.auto_deactivate_on_limit === 1 || wsRows[0]?.auto_deactivate_on_limit === true;
     }
 
     // Contar infracciones activas del cliente
@@ -98,8 +102,18 @@ export const createInfraction: RequestHandler = async (req: any, res: any) => {
 
     const activeCount = activeInfractions[0].count;
 
-    // Si está a una infracción del límite y no se ha confirmado, devolver advertencia
-    if (activeCount === maxInfractions - 1 && !confirmDeactivation) {
+    // Si ya alcanzó el límite, no permitir agregar más infracciones
+    if (activeCount >= maxInfractions) {
+      return res.status(400).json({
+        error: 'limit_reached',
+        message: `El cliente ya tiene ${activeCount} infracciones activas (límite: ${maxInfractions}). No se pueden agregar más infracciones.`,
+        activeInfractions: activeCount,
+        maxInfractions
+      });
+    }
+
+    // Si está a una infracción del límite y auto_deactivate está activo, mostrar advertencia
+    if (activeCount === maxInfractions - 1 && autoDeactivate && !confirmDeactivation) {
       return res.status(400).json({
         error: 'warning_third_infraction',
         message: `⚠️ ADVERTENCIA: Este cliente ya tiene ${activeCount} infracciones activas. Al agregar una más alcanzará el límite de ${maxInfractions} y será DESACTIVADO AUTOMÁTICAMENTE.`,
@@ -112,28 +126,51 @@ export const createInfraction: RequestHandler = async (req: any, res: any) => {
     // Crear la infracción
     const [result]: any = await req.db.query(
       `INSERT INTO client_infractions
-       (client_user_id, infraction_type, reason, related_invoice_id, created_by_user_id, is_active)
-       VALUES (?, 'manual', ?, ?, ?, TRUE)`,
-      [clientUserId, reason, relatedInvoiceId || null, createdByUserId]
+       (client_user_id, workspace_id, infraction_type, reason, related_invoice_id, created_by_user_id, is_active)
+       VALUES (?, ?, 'manual', ?, ?, ?, TRUE)`,
+      [clientUserId, workspaceId || null, reason, relatedInvoiceId || null, createdByUserId]
     );
 
-    // Si con esta infracción alcanza el límite, desactivar el cliente
-    if (activeCount >= maxInfractions - 1) {
-      await req.db.query(
-        `UPDATE users
-         SET is_active = FALSE,
-             deactivation_reason = ?,
-             deactivated_at = NOW()
-         WHERE id = ?`,
-        [`Desactivado automáticamente por alcanzar ${maxInfractions} infracciones activas`, clientUserId]
-      );
+    // Actualizar contador en clients_profiles
+    await req.db.query(
+      `UPDATE clients_profiles
+       SET active_infractions_count = (
+         SELECT COUNT(*) FROM client_infractions WHERE client_user_id = ? AND is_active = TRUE
+       )
+       WHERE user_id = ?`,
+      [clientUserId, clientUserId]
+    );
 
-      return res.json({
-        success: true,
-        infractionId: result.insertId,
-        message: `Infracción creada correctamente. El cliente ha sido desactivado automáticamente por alcanzar ${maxInfractions} infracciones activas.`,
-        clientDeactivated: true
-      });
+    // Si con esta infracción alcanza el límite
+    if (activeCount >= maxInfractions - 1) {
+      // Solo desactivar si auto_deactivate está activo
+      if (autoDeactivate) {
+        await req.db.query(
+          `UPDATE users
+           SET is_active = FALSE,
+               deactivation_reason = ?,
+               deactivated_at = NOW()
+           WHERE id = ?`,
+          [`Desactivado automáticamente por alcanzar ${maxInfractions} infracciones activas`, clientUserId]
+        );
+
+        return res.json({
+          success: true,
+          infractionId: result.insertId,
+          message: `Infracción creada. El cliente ha sido desactivado por alcanzar el límite de ${maxInfractions} infracciones.`,
+          clientDeactivated: true,
+          limitReached: true
+        });
+      } else {
+        // Si auto_deactivate está desactivado, solo notificar que alcanzó el límite
+        return res.json({
+          success: true,
+          infractionId: result.insertId,
+          message: `Infracción creada. El cliente ha alcanzado el límite de ${maxInfractions} infracciones.`,
+          clientDeactivated: false,
+          limitReached: true
+        });
+      }
     }
 
     res.json({
@@ -158,6 +195,18 @@ export const resolveInfraction: RequestHandler = async (req: any, res: any) => {
   const resolvedByUserId = req.user.id;
 
   try {
+    // Obtener el client_user_id antes de actualizar
+    const [infraction]: any = await req.db.query(
+      `SELECT client_user_id FROM client_infractions WHERE id = ?`,
+      [id]
+    );
+
+    if (!infraction || infraction.length === 0) {
+      return res.status(404).json({ error: 'Infracción no encontrada' });
+    }
+
+    const clientUserId = infraction[0].client_user_id;
+
     await req.db.query(
       `UPDATE client_infractions
        SET is_active = FALSE,
@@ -166,6 +215,16 @@ export const resolveInfraction: RequestHandler = async (req: any, res: any) => {
            resolution_notes = ?
        WHERE id = ?`,
       [resolvedByUserId, resolutionNotes || null, id]
+    );
+
+    // Actualizar contador en clients_profiles
+    await req.db.query(
+      `UPDATE clients_profiles
+       SET active_infractions_count = (
+         SELECT COUNT(*) FROM client_infractions WHERE client_user_id = ? AND is_active = TRUE
+       )
+       WHERE user_id = ?`,
+      [clientUserId, clientUserId]
     );
 
     res.json({ success: true, message: "Infracción resuelta correctamente" });

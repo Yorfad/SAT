@@ -4,7 +4,7 @@ import api from "../../lib/api";
 import { money } from "../../utils/format";
 import { useWorkspace } from "../../context/WorkspaceContext";
 
-type TabType = "payments" | "expenses";
+type TabType = "client-payments" | "income" | "expenses";
 
 type PendingPayment = {
   id: number;
@@ -34,7 +34,7 @@ type Expense = {
 };
 
 export default function FinancialManagementPage() {
-  const [activeTab, setActiveTab] = useState<TabType>("payments");
+  const [activeTab, setActiveTab] = useState<TabType>("client-payments");
   const [showAllWorkspaces, setShowAllWorkspaces] = useState(false);
   const { workspaces, currentWorkspace, setConsolidatedView, switchWorkspace } = useWorkspace();
   const queryClient = useQueryClient();
@@ -121,20 +121,29 @@ export default function FinancialManagementPage() {
         <div className="border-b border-slate-700">
           <nav className="flex -mb-px">
             <Tab
-              active={activeTab === "payments"}
-              onClick={() => setActiveTab("payments")}
-              label="Pagos"
+              active={activeTab === "client-payments"}
+              onClick={() => setActiveTab("client-payments")}
+              label="Pagos de Clientes"
+              icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>}
+            />
+            <Tab
+              active={activeTab === "income"}
+              onClick={() => setActiveTab("income")}
+              label="Ingresos"
+              icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
             />
             <Tab
               active={activeTab === "expenses"}
               onClick={() => setActiveTab("expenses")}
               label="Gastos"
+              icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4m16 0l-4 4m4-4l-4-4" /></svg>}
             />
           </nav>
         </div>
 
         <div className="p-6">
-          {activeTab === "payments" && <PaymentsTab />}
+          {activeTab === "client-payments" && <ClientPaymentsTab showAllWorkspaces={showAllWorkspaces} />}
+          {activeTab === "income" && <IncomeTab />}
           {activeTab === "expenses" && <ExpensesTab />}
         </div>
       </div>
@@ -142,213 +151,781 @@ export default function FinancialManagementPage() {
   );
 }
 
-function Tab({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
+function Tab({ active, onClick, label, icon }: { active: boolean; onClick: () => void; label: string; icon?: React.ReactNode }) {
   return (
     <button
       onClick={onClick}
-      className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
+      className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
         active
           ? "border-orange-500 text-orange-400"
           : "border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-600"
       }`}
     >
+      {icon}
       {label}
     </button>
   );
 }
 
 // ============================================================================
-// TAB DE PAGOS
+// TAB DE PAGOS DE CLIENTES (Cash Payments integrado)
 // ============================================================================
 
-function PaymentsTab() {
+type ClientForPayment = {
+  id: number;
+  full_name: string;
+  email: string;
+  phone: string | null;
+  is_active: boolean;
+  account_balance: number;
+  accountBalance: number;
+  monthlyDebt: number;
+  totalDebt: number;
+  active_infractions_count: number;
+  workspace_name: string | null;
+  lastPayment: {
+    amount: number;
+    payment_date: string;
+    payment_method: string;
+  } | null;
+};
+
+type Payment = {
+  id: number;
+  amount: number;
+  payment_method: string;
+  payment_type: string;
+  notes: string | null;
+  reference_number: string | null;
+  balance_before: number;
+  balance_after: number;
+  payment_date: string;
+  created_at: string;
+  registered_by_name: string;
+  workspace_name: string | null;
+};
+
+type Invoice = {
+  id: number;
+  invoice_year: number;
+  invoice_month: number;
+  total_due: number;
+  amount_paid: number;
+  balance: number;
+  payment_status: string;
+  payment_registered_at: string | null;
+  created_at: string;
+};
+
+function ClientPaymentsTab({ showAllWorkspaces }: { showAllWorkspaces: boolean }) {
   const queryClient = useQueryClient();
-  const [selectedInvoice, setSelectedInvoice] = useState<PendingPayment | null>(null);
-  const [paymentStatus, setPaymentStatus] = useState<string>("paid");
-  const [amountPaid, setAmountPaid] = useState<string>("");
-  const [notes, setNotes] = useState<string>("");
+  const [selectedClient, setSelectedClient] = useState<ClientForPayment | null>(null);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
 
-  const { data: pendingPayments, isLoading } = useQuery({
-    queryKey: ["pending-payments"],
-    queryFn: async () => (await api.get<PendingPayment[]>("/payments/pending")).data,
+  // Obtener clientes con saldos
+  const { data: clients = [], isLoading } = useQuery({
+    queryKey: ["cash-payments-clients", showAllWorkspaces],
+    queryFn: async () => (await api.get<ClientForPayment[]>("/cash-payments/clients")).data
   });
 
+  // Filtrar clientes
+  const filteredClients = clients.filter(c =>
+    c.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    c.email.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  // Obtener historial del cliente seleccionado
+  const { data: clientHistory } = useQuery({
+    queryKey: ["cash-payments-history", selectedClient?.id],
+    queryFn: async () => {
+      if (!selectedClient) return null;
+      return (await api.get<{ payments: Payment[]; invoices: Invoice[] }>(`/cash-payments/history/${selectedClient.id}`)).data;
+    },
+    enabled: !!selectedClient
+  });
+
+  // Mutacion para registrar pago
   const registerPaymentMutation = useMutation({
-    mutationFn: async (data: { invoiceId: number; paymentStatus: string; amountPaid: number; notes?: string }) => {
-      await api.post(`/payments/register/${data.invoiceId}`, {
-        paymentStatus: data.paymentStatus,
-        amountPaid: data.amountPaid,
-        notes: data.notes,
-      });
-    },
+    mutationFn: async (data: {
+      clientId: number;
+      amount: number;
+      paymentMethod: string;
+      paymentType: string;
+      notes: string;
+      paymentDate: string;
+    }) => (await api.post("/cash-payments", data)).data,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["pending-payments"] });
+      queryClient.invalidateQueries({ queryKey: ["cash-payments-clients"] });
+      queryClient.invalidateQueries({ queryKey: ["cash-payments-history"] });
       queryClient.invalidateQueries({ queryKey: ["admin-summary"] });
-      setSelectedInvoice(null);
-      setAmountPaid("");
-      setNotes("");
+      setShowPaymentModal(false);
       alert("Pago registrado correctamente");
-    },
+    }
   });
 
-  const handleRegisterPayment = () => {
-    if (!selectedInvoice || !amountPaid) {
-      alert("Selecciona una factura y especifica el monto pagado");
-      return;
-    }
+  // Resumen de pagos
+  const { data: summary } = useQuery({
+    queryKey: ["cash-payments-summary", showAllWorkspaces],
+    queryFn: async () => (await api.get("/cash-payments/summary")).data
+  });
 
-    registerPaymentMutation.mutate({
-      invoiceId: selectedInvoice.id,
-      paymentStatus,
-      amountPaid: parseFloat(amountPaid),
-      notes: notes || undefined,
-    });
-  };
-
-  if (isLoading) return <div className="text-slate-400">Cargando pagos pendientes...</div>;
+  if (isLoading) return <div className="text-slate-400">Cargando clientes...</div>;
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Lista de Pagos Pendientes */}
-        <div>
-          <h3 className="text-lg font-semibold mb-4 text-white">Pagos Pendientes del Mes</h3>
-          <div className="space-y-2 max-h-96 overflow-y-auto">
-            {pendingPayments && pendingPayments.length > 0 ? (
-              pendingPayments.map((payment) => (
-                <div
-                  key={payment.id}
-                  onClick={() => {
-                    setSelectedInvoice(payment);
-                    setAmountPaid(payment.balance.toString());
-                  }}
-                  className={`p-4 border rounded-lg cursor-pointer transition-colors ${
-                    selectedInvoice?.id === payment.id
-                      ? "border-orange-500 bg-orange-950/20"
-                      : "border-slate-700 bg-slate-800 hover:border-slate-600"
-                  }`}
-                >
-                  <div className="flex justify-between items-start mb-2">
-                    <div>
-                      <p className="font-semibold text-white">{payment.client_name}</p>
-                      <p className="text-xs text-slate-400">{payment.client_email}</p>
-                    </div>
-                    {payment.active_infractions_count > 0 && (
-                      <span className="bg-red-900/30 text-red-400 text-xs px-2 py-1 rounded border border-red-800">
-                        {payment.active_infractions_count} infracciones
-                      </span>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div>
-                      <span className="text-slate-400">Total:</span>
-                      <span className="ml-1 font-medium text-slate-200">{money(payment.total_due)}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400">Pagado:</span>
-                      <span className="ml-1 font-medium text-slate-200">{money(payment.amount_paid)}</span>
-                    </div>
-                    <div className="col-span-2">
-                      <span className="text-slate-400">Saldo:</span>
-                      <span className="ml-1 font-medium text-red-400">{money(payment.balance)}</span>
-                    </div>
-                  </div>
-                  <div className="mt-2">
-                    <span
-                      className={`text-xs px-2 py-1 rounded ${
-                        payment.payment_status === "paid"
-                          ? "bg-green-900/30 text-green-400 border border-green-800"
-                          : payment.payment_status === "partial"
-                          ? "bg-yellow-900/30 text-yellow-400 border border-yellow-800"
-                          : "bg-slate-700 text-slate-300 border border-slate-600"
-                      }`}
-                    >
-                      {payment.payment_status}
-                    </span>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <p className="text-slate-400 text-center py-8">No hay pagos pendientes</p>
-            )}
+      {/* Resumen */}
+      {summary && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-gradient-to-br from-green-900/30 to-green-800/20 border border-green-700/50 rounded-xl p-4">
+            <p className="text-sm text-green-400">Pagos del Mes</p>
+            <p className="text-2xl font-bold text-green-300">{money(summary.totalAmount)}</p>
+            <p className="text-xs text-green-500">{summary.totalPayments} transacciones</p>
+          </div>
+          <div className="bg-gradient-to-br from-blue-900/30 to-blue-800/20 border border-blue-700/50 rounded-xl p-4">
+            <p className="text-sm text-blue-400">Clientes que Pagaron</p>
+            <p className="text-2xl font-bold text-blue-300">{summary.uniqueClients}</p>
+          </div>
+          <div className="bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 rounded-xl p-4">
+            <p className="text-sm text-slate-400">Total Clientes</p>
+            <p className="text-2xl font-bold text-slate-200">{clients.length}</p>
           </div>
         </div>
+      )}
 
-        {/* Formulario de Registro de Pago */}
-        <div>
-          <h3 className="text-lg font-semibold mb-4 text-white">Registrar Pago</h3>
-          {selectedInvoice ? (
-            <div className="space-y-4">
-              <div className="bg-slate-800 border border-slate-700 p-4 rounded-lg">
-                <p className="font-semibold text-white">{selectedInvoice.client_name}</p>
-                <p className="text-sm text-slate-400">
-                  Factura: {selectedInvoice.invoice_month}/{selectedInvoice.invoice_year}
-                </p>
-                <p className="text-lg font-bold mt-2 text-orange-400">Saldo: {money(selectedInvoice.balance)}</p>
-              </div>
+      {/* Buscador */}
+      <div className="flex items-center gap-4">
+        <div className="flex-1 relative">
+          <input
+            type="text"
+            placeholder="Buscar cliente por nombre o email..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full px-4 py-2 pl-10 bg-slate-800 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:border-orange-500"
+          />
+          <svg className="w-5 h-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+        </div>
+      </div>
 
+      {/* Lista de clientes */}
+      <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+        {filteredClients.length === 0 ? (
+          <div className="p-8 text-center text-slate-400">No se encontraron clientes</div>
+        ) : (
+          <table className="w-full">
+            <thead className="bg-slate-900/50">
+              <tr>
+                <th className="text-left p-4 text-slate-400 font-medium">Cliente</th>
+                <th className="text-right p-4 text-slate-400 font-medium">Deuda Mes</th>
+                <th className="text-right p-4 text-slate-400 font-medium">Deuda Total</th>
+                <th className="text-right p-4 text-slate-400 font-medium">Saldo</th>
+                <th className="text-center p-4 text-slate-400 font-medium">Acciones</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-700">
+              {filteredClients.map(client => (
+                <tr key={client.id} className="hover:bg-slate-700/30 transition-colors">
+                  <td className="p-4">
+                    <div>
+                      <p className="text-white font-medium">{client.full_name}</p>
+                      <p className="text-sm text-slate-400">{client.email}</p>
+                      {showAllWorkspaces && client.workspace_name && (
+                        <span className="text-xs px-2 py-0.5 bg-slate-700 rounded text-purple-300 mt-1 inline-block">
+                          {client.workspace_name}
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="p-4 text-right">
+                    <span className={client.monthlyDebt > 0 ? 'text-red-400' : 'text-green-400'}>
+                      {money(client.monthlyDebt)}
+                    </span>
+                  </td>
+                  <td className="p-4 text-right">
+                    <span className={client.totalDebt > 0 ? 'text-red-400' : 'text-green-400'}>
+                      {money(client.totalDebt)}
+                    </span>
+                  </td>
+                  <td className="p-4 text-right">
+                    <span className={client.accountBalance >= 0 ? 'text-green-400' : 'text-red-400'}>
+                      {money(client.accountBalance)}
+                    </span>
+                  </td>
+                  <td className="p-4">
+                    <div className="flex items-center justify-center gap-2">
+                      <button
+                        onClick={() => {
+                          setSelectedClient(client);
+                          setShowPaymentModal(true);
+                        }}
+                        className="px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white text-sm rounded-lg transition-colors flex items-center gap-1"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                        </svg>
+                        Pago
+                      </button>
+                      <button
+                        onClick={() => setSelectedClient(client)}
+                        className="px-3 py-1.5 bg-slate-600 hover:bg-slate-500 text-white text-sm rounded-lg transition-colors"
+                      >
+                        Historial
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Modal de historial */}
+      {selectedClient && !showPaymentModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-800 rounded-xl w-full max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
+            <div className="p-4 border-b border-slate-700 flex items-center justify-between">
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1">Estado del Pago</label>
-                <select
-                  value={paymentStatus}
-                  onChange={(e) => setPaymentStatus(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 text-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                >
-                  <option value="paid">Pagado Completo</option>
-                  <option value="partial">Pago Parcial/Abono</option>
-                  <option value="deferred_next_month">Pasa al Siguiente Mes</option>
-                </select>
+                <h2 className="text-lg font-semibold text-white">{selectedClient.full_name}</h2>
+                <p className="text-sm text-slate-400">Historial de pagos y facturas</p>
               </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1">Monto Pagado</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={amountPaid}
-                  onChange={(e) => setAmountPaid(e.target.value)}
-                  placeholder="0.00"
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 text-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1">Notas (opcional)</label>
-                <textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  rows={3}
-                  placeholder="Observaciones sobre el pago..."
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 text-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                />
-              </div>
-
-              <div className="flex gap-2">
+              <div className="flex items-center gap-4">
+                <div className="text-right">
+                  <p className="text-sm text-slate-400">Saldo actual</p>
+                  <p className={`text-lg font-bold ${selectedClient.accountBalance >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    {money(selectedClient.accountBalance)}
+                  </p>
+                </div>
                 <button
-                  onClick={handleRegisterPayment}
-                  disabled={registerPaymentMutation.isPending}
-                  className="flex-1 bg-gradient-to-r from-orange-600 to-amber-600 text-white px-4 py-2 rounded-lg hover:from-orange-700 hover:to-amber-700 disabled:opacity-50 font-medium"
+                  onClick={() => setSelectedClient(null)}
+                  className="p-2 hover:bg-slate-700 rounded-lg transition-colors"
                 >
-                  {registerPaymentMutation.isPending ? "Registrando..." : "Registrar Pago"}
-                </button>
-                <button
-                  onClick={() => {
-                    setSelectedInvoice(null);
-                    setAmountPaid("");
-                    setNotes("");
-                  }}
-                  className="px-4 py-2 border border-slate-600 text-slate-300 rounded-lg hover:bg-slate-800"
-                >
-                  Cancelar
+                  <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
                 </button>
               </div>
             </div>
-          ) : (
-            <p className="text-slate-400 text-center py-8">
-              Selecciona una factura de la lista para registrar un pago
-            </p>
-          )}
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {/* Pagos */}
+              <div>
+                <h3 className="text-white font-medium mb-2 flex items-center gap-2">
+                  <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+                  </svg>
+                  Pagos Registrados
+                </h3>
+                {clientHistory?.payments && clientHistory.payments.length > 0 ? (
+                  <div className="space-y-2">
+                    {clientHistory.payments.map(payment => (
+                      <div key={payment.id} className="bg-slate-700/50 rounded-lg p-3 flex items-center justify-between">
+                        <div>
+                          <p className="text-green-400 font-medium">{money(payment.amount)}</p>
+                          <p className="text-xs text-slate-400">
+                            {new Date(payment.payment_date).toLocaleDateString()} - {payment.payment_method}
+                            {payment.notes && ` - ${payment.notes}`}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs text-slate-400">Saldo: {money(payment.balance_before)} → {money(payment.balance_after)}</p>
+                          <p className="text-xs text-slate-500">Por: {payment.registered_by_name}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-slate-400 text-sm">No hay pagos registrados</p>
+                )}
+              </div>
+
+              {/* Facturas */}
+              <div>
+                <h3 className="text-white font-medium mb-2 flex items-center gap-2">
+                  <svg className="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  Facturas Mensuales
+                </h3>
+                {clientHistory?.invoices && clientHistory.invoices.length > 0 ? (
+                  <div className="space-y-2">
+                    {clientHistory.invoices.map(invoice => (
+                      <div key={invoice.id} className="bg-slate-700/50 rounded-lg p-3 flex items-center justify-between">
+                        <div>
+                          <p className="text-white font-medium">
+                            {new Date(invoice.invoice_year, invoice.invoice_month - 1).toLocaleDateString('es', { month: 'long', year: 'numeric' })}
+                          </p>
+                          <p className="text-xs text-slate-400">
+                            Total: {money(invoice.total_due)} | Pagado: {money(invoice.amount_paid || 0)}
+                          </p>
+                        </div>
+                        <div>
+                          <span className={`px-2 py-1 rounded text-xs font-medium ${
+                            invoice.payment_status === 'paid' ? 'bg-green-900/50 text-green-400' :
+                            invoice.payment_status === 'partial' ? 'bg-yellow-900/50 text-yellow-400' :
+                            invoice.payment_status === 'overdue' ? 'bg-red-900/50 text-red-400' :
+                            'bg-slate-600 text-slate-300'
+                          }`}>
+                            {invoice.payment_status === 'paid' ? 'Pagado' :
+                             invoice.payment_status === 'partial' ? 'Parcial' :
+                             invoice.payment_status === 'overdue' ? 'Vencido' :
+                             'Pendiente'}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-slate-400 text-sm">No hay facturas</p>
+                )}
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-slate-700 flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setShowPaymentModal(true);
+                }}
+                className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg transition-colors"
+              >
+                Registrar Pago
+              </button>
+              <button
+                onClick={() => setSelectedClient(null)}
+                className="px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg transition-colors"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
         </div>
+      )}
+
+      {/* Modal de registro de pago */}
+      {showPaymentModal && selectedClient && (
+        <PaymentModal
+          client={selectedClient}
+          onClose={() => setShowPaymentModal(false)}
+          onSubmit={(data) => registerPaymentMutation.mutate(data)}
+          isLoading={registerPaymentMutation.isPending}
+        />
+      )}
+    </div>
+  );
+}
+
+function PaymentModal({
+  client,
+  onClose,
+  onSubmit,
+  isLoading
+}: {
+  client: ClientForPayment;
+  onClose: () => void;
+  onSubmit: (data: {
+    clientId: number;
+    amount: number;
+    paymentMethod: string;
+    paymentType: string;
+    notes: string;
+    paymentDate: string;
+  }) => void;
+  isLoading: boolean;
+}) {
+  const [amount, setAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [paymentType, setPaymentType] = useState("regular");
+  const [notes, setNotes] = useState("");
+  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!amount || parseFloat(amount) <= 0) return;
+
+    onSubmit({
+      clientId: client.id,
+      amount: parseFloat(amount),
+      paymentMethod,
+      paymentType,
+      notes,
+      paymentDate
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-slate-800 rounded-xl w-full max-w-md">
+        <div className="p-4 border-b border-slate-700">
+          <h2 className="text-lg font-semibold text-white">Registrar Pago</h2>
+          <p className="text-sm text-slate-400">Cliente: {client.full_name}</p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-4 space-y-4">
+          {/* Info del cliente */}
+          <div className="bg-slate-700/50 rounded-lg p-3 space-y-1">
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-400">Deuda del mes:</span>
+              <span className="text-red-400">{money(client.monthlyDebt)}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-400">Deuda total:</span>
+              <span className="text-red-400">{money(client.totalDebt)}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-400">Saldo actual:</span>
+              <span className={client.accountBalance >= 0 ? 'text-green-400' : 'text-red-400'}>
+                {money(client.accountBalance)}
+              </span>
+            </div>
+          </div>
+
+          {/* Monto */}
+          <div>
+            <label className="block text-sm text-slate-300 mb-1">Monto del pago *</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">Q</span>
+              <input
+                type="number"
+                step="0.01"
+                min="0.01"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="w-full pl-8 pr-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:border-green-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                placeholder="0.00"
+                required
+              />
+            </div>
+          </div>
+
+          {/* Fecha */}
+          <div>
+            <label className="block text-sm text-slate-300 mb-1">Fecha del pago</label>
+            <input
+              type="date"
+              value={paymentDate}
+              onChange={(e) => setPaymentDate(e.target.value)}
+              className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-green-500"
+            />
+          </div>
+
+          {/* Metodo de pago */}
+          <div>
+            <label className="block text-sm text-slate-300 mb-1">Metodo de pago</label>
+            <select
+              value={paymentMethod}
+              onChange={(e) => setPaymentMethod(e.target.value)}
+              className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-green-500"
+            >
+              <option value="cash">Efectivo</option>
+              <option value="transfer">Transferencia</option>
+              <option value="card">Tarjeta</option>
+              <option value="other">Otro</option>
+            </select>
+          </div>
+
+          {/* Tipo de pago */}
+          <div>
+            <label className="block text-sm text-slate-300 mb-1">Tipo de pago</label>
+            <select
+              value={paymentType}
+              onChange={(e) => setPaymentType(e.target.value)}
+              className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-green-500"
+            >
+              <option value="regular">Pago regular</option>
+              <option value="advance">Anticipo</option>
+              <option value="partial">Abono parcial</option>
+              <option value="debt">Pago de deuda</option>
+            </select>
+          </div>
+
+          {/* Notas */}
+          <div>
+            <label className="block text-sm text-slate-300 mb-1">Notas (opcional)</label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:border-green-500 resize-none"
+              rows={2}
+              placeholder="Notas adicionales..."
+            />
+          </div>
+
+          {/* Botones */}
+          <div className="flex gap-2 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg transition-colors"
+              disabled={isLoading}
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg transition-colors disabled:opacity-50"
+              disabled={isLoading || !amount}
+            >
+              {isLoading ? 'Registrando...' : 'Registrar Pago'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// TAB DE INGRESOS EXTERNOS (para el dueño del negocio)
+// ============================================================================
+
+type ExternalIncome = {
+  id: number;
+  description: string;
+  amount: number;
+  income_date: string;
+  source: string;
+  notes: string | null;
+  created_by_name: string;
+  created_at: string;
+};
+
+function IncomeTab() {
+  const queryClient = useQueryClient();
+  const currentYear = new Date().getFullYear();
+  const currentMonth = new Date().getMonth() + 1;
+  const { currentWorkspace } = useWorkspace();
+
+  const [showForm, setShowForm] = useState(false);
+  const [description, setDescription] = useState("");
+  const [amount, setAmount] = useState("");
+  const [incomeDate, setIncomeDate] = useState(new Date().toISOString().split("T")[0]);
+  const [source, setSource] = useState("salary");
+  const [notes, setNotes] = useState("");
+
+  // Query para ingresos externos
+  const { data: incomes = [], isLoading } = useQuery({
+    queryKey: ["external-incomes", currentYear, currentMonth, currentWorkspace?.slug],
+    queryFn: async () => {
+      try {
+        const { data } = await api.get<ExternalIncome[]>(`/external-incomes?year=${currentYear}&month=${currentMonth}`);
+        return data;
+      } catch {
+        return [];
+      }
+    }
+  });
+
+  // Query para resumen
+  const { data: summary } = useQuery({
+    queryKey: ["external-incomes-summary", currentYear, currentMonth, currentWorkspace?.slug],
+    queryFn: async () => {
+      try {
+        const { data } = await api.get(`/external-incomes/summary?year=${currentYear}&month=${currentMonth}`);
+        return data;
+      } catch {
+        return { total: 0, count: 0 };
+      }
+    }
+  });
+
+  const createIncomeMutation = useMutation({
+    mutationFn: async (data: any) => {
+      await api.post("/external-incomes", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["external-incomes"] });
+      queryClient.invalidateQueries({ queryKey: ["external-incomes-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-summary"] });
+      setShowForm(false);
+      setDescription("");
+      setAmount("");
+      setSource("salary");
+      setNotes("");
+      alert("Ingreso registrado correctamente");
+    }
+  });
+
+  const deleteIncomeMutation = useMutation({
+    mutationFn: async (id: number) => {
+      await api.delete(`/external-incomes/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["external-incomes"] });
+      queryClient.invalidateQueries({ queryKey: ["external-incomes-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-summary"] });
+      alert("Ingreso eliminado");
+    }
+  });
+
+  const handleCreateIncome = () => {
+    if (!description || !amount) {
+      alert("Completa todos los campos requeridos");
+      return;
+    }
+
+    createIncomeMutation.mutate({
+      description,
+      amount: parseFloat(amount),
+      incomeDate,
+      source,
+      notes: notes || undefined
+    });
+  };
+
+  const sourceLabels: Record<string, string> = {
+    salary: "Salario",
+    freelance: "Freelance",
+    investment: "Inversión",
+    rental: "Alquiler",
+    other: "Otro"
+  };
+
+  if (isLoading) return <div className="text-slate-400">Cargando ingresos...</div>;
+
+  return (
+    <div className="space-y-6">
+      {/* Resumen */}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="bg-gradient-to-br from-green-900/30 to-green-800/20 border border-green-700/50 rounded-xl p-4">
+          <p className="text-sm text-green-400">Total Ingresos del Mes</p>
+          <p className="text-2xl font-bold text-green-300">{money(summary?.total || 0)}</p>
+        </div>
+        <div className="bg-gradient-to-br from-blue-900/30 to-blue-800/20 border border-blue-700/50 rounded-xl p-4">
+          <p className="text-sm text-blue-400">Registros</p>
+          <p className="text-2xl font-bold text-blue-300">{summary?.count || 0}</p>
+        </div>
+      </div>
+
+      {/* Header con botón */}
+      <div className="flex justify-between items-center">
+        <div>
+          <h3 className="text-lg font-semibold text-white">Ingresos Externos</h3>
+          <p className="text-sm text-slate-400">Registra ingresos de otras fuentes (salarios, freelance, etc.)</p>
+        </div>
+        <button
+          onClick={() => setShowForm(!showForm)}
+          className="bg-gradient-to-r from-green-600 to-emerald-600 text-white px-4 py-2 rounded-lg hover:from-green-700 hover:to-emerald-700 font-medium"
+        >
+          {showForm ? "Cancelar" : "+ Agregar Ingreso"}
+        </button>
+      </div>
+
+      {/* Formulario */}
+      {showForm && (
+        <div className="bg-slate-800 border border-slate-700 rounded-lg p-6 space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1">Fuente de Ingreso</label>
+              <select
+                value={source}
+                onChange={(e) => setSource(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 text-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+              >
+                <option value="salary">Salario</option>
+                <option value="freelance">Freelance</option>
+                <option value="investment">Inversión</option>
+                <option value="rental">Alquiler</option>
+                <option value="other">Otro</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1">Fecha</label>
+              <input
+                type="date"
+                value={incomeDate}
+                onChange={(e) => setIncomeDate(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 text-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-1">Descripción *</label>
+            <input
+              type="text"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Ej: Salario de Enero, Proyecto freelance..."
+              className="w-full px-3 py-2 bg-slate-900 border border-slate-700 text-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1">Monto *</label>
+              <input
+                type="number"
+                step="0.01"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="0.00"
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 text-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1">Notas (opcional)</label>
+              <input
+                type="text"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Notas adicionales..."
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 text-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </div>
+          </div>
+
+          <button
+            onClick={handleCreateIncome}
+            disabled={createIncomeMutation.isPending}
+            className="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white px-4 py-2 rounded-lg hover:from-green-700 hover:to-emerald-700 disabled:opacity-50 font-medium"
+          >
+            {createIncomeMutation.isPending ? "Guardando..." : "Guardar Ingreso"}
+          </button>
+        </div>
+      )}
+
+      {/* Lista de Ingresos */}
+      <div className="space-y-2">
+        {incomes.length > 0 ? (
+          incomes.map((income) => (
+            <div key={income.id} className="bg-slate-800 border border-slate-700 rounded-lg p-4">
+              <div className="flex justify-between items-start">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <p className="font-semibold text-white">{income.description}</p>
+                    <span className="text-xs px-2 py-1 rounded bg-green-900/30 text-green-400 border border-green-800">
+                      {sourceLabels[income.source] || income.source}
+                    </span>
+                  </div>
+                  <p className="text-sm text-slate-400">
+                    {new Date(income.income_date).toLocaleDateString()} • Registrado por {income.created_by_name}
+                    {income.notes && ` • ${income.notes}`}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <p className="text-lg font-bold text-green-400">{money(income.amount)}</p>
+                  <button
+                    onClick={() => {
+                      if (confirm(`¿Eliminar "${income.description}"?`)) {
+                        deleteIncomeMutation.mutate(income.id);
+                      }
+                    }}
+                    className="px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700 transition-colors"
+                    title="Eliminar"
+                  >
+                    🗑️
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))
+        ) : (
+          <p className="text-slate-400 text-center py-8">No hay ingresos registrados para este mes</p>
+        )}
       </div>
     </div>
   );
@@ -370,6 +947,7 @@ type ExpenseCategory = {
 
 function ExpensesTab() {
   const queryClient = useQueryClient();
+  const { currentWorkspace } = useWorkspace();
   const currentYear = new Date().getFullYear();
   const currentMonth = new Date().getMonth() + 1;
 
@@ -386,11 +964,12 @@ function ExpensesTab() {
   const [showCategoriesModal, setShowCategoriesModal] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newCategoryColor, setNewCategoryColor] = useState("#6B7280");
+  const [newCategoryIsGlobal, setNewCategoryIsGlobal] = useState(false);
   const [editingCategory, setEditingCategory] = useState<ExpenseCategory | null>(null);
 
-  // Query para categorias
+  // Query para categorias - incluir workspace para refrescar al cambiar
   const { data: categories = [] } = useQuery({
-    queryKey: ["expense-categories"],
+    queryKey: ["expense-categories", currentWorkspace?.slug],
     queryFn: async () => (await api.get<ExpenseCategory[]>("/expense-categories")).data,
   });
 
@@ -801,34 +1380,54 @@ function ExpensesTab() {
               {/* Nueva categoria */}
               <div className="bg-slate-900 rounded-lg p-4 border border-slate-700">
                 <h3 className="text-sm font-medium text-slate-300 mb-3">Nueva Categoria</h3>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={newCategoryName}
-                    onChange={(e) => setNewCategoryName(e.target.value)}
-                    placeholder="Nombre de la categoria..."
-                    className="flex-1 px-3 py-2 bg-slate-800 border border-slate-600 text-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  />
-                  <input
-                    type="color"
-                    value={newCategoryColor}
-                    onChange={(e) => setNewCategoryColor(e.target.value)}
-                    className="w-12 h-10 rounded cursor-pointer border border-slate-600"
-                    title="Color de la categoria"
-                  />
-                  <button
-                    onClick={() => {
-                      if (!newCategoryName.trim()) return;
-                      createCategoryMutation.mutate({
-                        name: newCategoryName.trim(),
-                        color: newCategoryColor
-                      });
-                    }}
-                    disabled={createCategoryMutation.isPending || !newCategoryName.trim()}
-                    className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50"
-                  >
-                    {createCategoryMutation.isPending ? "..." : "Agregar"}
-                  </button>
+                <div className="space-y-3">
+                  <div className="flex gap-2 items-center">
+                    <input
+                      type="text"
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      placeholder="Nombre de la categoria..."
+                      className="flex-1 px-3 py-2 bg-slate-800 border border-slate-600 text-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    />
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-400">Color:</span>
+                      <input
+                        type="color"
+                        value={newCategoryColor}
+                        onChange={(e) => setNewCategoryColor(e.target.value)}
+                        className="w-10 h-10 rounded cursor-pointer border border-slate-600"
+                        title="Color de la categoria"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={newCategoryIsGlobal}
+                        onChange={(e) => setNewCategoryIsGlobal(e.target.checked)}
+                        className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-orange-500 focus:ring-orange-500"
+                      />
+                      <span>Visible en todos los workspaces (Global)</span>
+                    </label>
+                    <button
+                      onClick={() => {
+                        if (!newCategoryName.trim()) return;
+                        createCategoryMutation.mutate({
+                          name: newCategoryName.trim(),
+                          color: newCategoryColor,
+                          isGlobal: newCategoryIsGlobal
+                        });
+                        setNewCategoryName("");
+                        setNewCategoryColor("#6B7280");
+                        setNewCategoryIsGlobal(false);
+                      }}
+                      disabled={createCategoryMutation.isPending || !newCategoryName.trim()}
+                      className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50"
+                    >
+                      {createCategoryMutation.isPending ? "..." : "Agregar"}
+                    </button>
+                  </div>
                 </div>
               </div>
 

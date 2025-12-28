@@ -2,25 +2,34 @@ import { RequestHandler } from "express";
 import bcrypt from "bcryptjs";
 
 // Columnas del sistema que NO se pueden modificar ni eliminar
-// Solo las PKs, FKs y campos calculados automáticamente
+// Incluye PKs, FKs, campos calculados y campos default obligatorios
 const SYSTEM_COLUMNS = [
+  // Campos de la tabla users (siempre requeridos)
+  'full_name',                  // Nombre completo del usuario
+  'email',                      // Email del usuario (login)
+  'nit',                        // NIT del cliente
+  // Campos de clients_profiles
   'user_id',                    // PK - relación con users
   'workspace_id',               // FK - workspace del cliente
-  'sat_password_encrypted',     // Contraseña SAT (encriptada)
+  'sat_password',               // Contraseña SAT (en client_profile_fields)
+  'sat_password_encrypted',     // Contraseña SAT (columna real encriptada)
+  'firma_electronica',          // Firma electrónica del cliente
+  'phone_number',               // Teléfono del cliente (migrado de users)
+  'birth_date',                 // Fecha de nacimiento (migrado de users)
   'overall_rating',             // Calculado automáticamente
   'active_infractions_count',   // Calculado automáticamente
-  'ratings_count'               // Calculado automáticamente
+  'ratings_count',              // Calculado automáticamente
+  'account_balance'             // Saldo del cliente
 ];
 
-// Campos default que se crean con la tabla pero son editables/eliminables
-const DEFAULT_FIELDS = [
+// Campos editables/eliminables por el admin
+const EDITABLE_FIELDS = [
+  'company_name',     // Empresa
   'contract_number',  // Número de contrato
   'sede',             // Sede
   'grupo',            // Grupo
-  'notes',            // Notas
-  'direccion',        // Dirección
-  'fecha_nacimiento', // Fecha de nacimiento
-  'empresa'           // Empresa/Compañía
+  'address',          // Dirección
+  'notes'             // Notas
 ];
 
 // Mapeo de tipos de campo a tipos SQL
@@ -68,7 +77,6 @@ export const getClientFields: RequestHandler = async (req: any, res: any) => {
         cpf.*,
         COALESCE(ws_override.is_required, cpf.is_required) as effective_required,
         COALESCE(ws_override.show_in_registration, cpf.show_in_registration) as effective_show_registration,
-        COALESCE(ws_override.show_in_list, cpf.show_in_list) as effective_show_list,
         COALESCE(ws_override.is_active, cpf.is_active) as effective_active,
         ws_override.id as override_id
        FROM client_profile_fields cpf
@@ -90,37 +98,60 @@ export const getClientFields: RequestHandler = async (req: any, res: any) => {
 
 /**
  * GET /api/client-fields/all
- * Obtener todos los campos (para admin) - incluye info de columnas
+ * Obtener campos para admin - filtra por workspace actual a menos que sea vista consolidada
  */
 export const getAllClientFields: RequestHandler = async (req: any, res: any) => {
   try {
     const workspaceId = req.workspaceId || null;
+    const isConsolidated = req.isConsolidatedView;
     const existingColumns = await getExistingColumns(req.db);
 
-    // Obtener campos base con override del workspace si existe
-    const [fields] = await req.db.query(
-      `SELECT
-        cpf.*,
-        ws_override.id as override_id,
-        ws_override.is_required as ws_required,
-        ws_override.show_in_registration as ws_show_registration,
-        ws_override.show_in_list as ws_show_list,
-        ws_override.is_active as ws_active,
-        ws_override.display_order as ws_display_order
-       FROM client_profile_fields cpf
-       LEFT JOIN client_profile_fields ws_override
-         ON ws_override.field_key = cpf.field_key
-         AND ws_override.workspace_id = ?
-       WHERE cpf.workspace_id IS NULL
-       ORDER BY cpf.display_order ASC`,
-      [workspaceId]
-    );
+    // En vista consolidada: todos los campos base
+    // En workspace específico: solo campos activos para ese workspace
+    let query: string;
+    let params: any[];
+
+    if (isConsolidated) {
+      // Vista consolidada: mostrar todos los campos base
+      query = `
+        SELECT cpf.*,
+          NULL as override_id,
+          NULL as ws_required,
+          NULL as ws_show_registration,
+          NULL as ws_active,
+          NULL as ws_display_order
+        FROM client_profile_fields cpf
+        WHERE cpf.workspace_id IS NULL
+        ORDER BY cpf.display_order ASC`;
+      params = [];
+    } else {
+      // Workspace específico: solo campos activos para este workspace
+      query = `
+        SELECT
+          cpf.*,
+          ws_override.id as override_id,
+          ws_override.is_required as ws_required,
+          ws_override.show_in_registration as ws_show_registration,
+          ws_override.is_active as ws_active,
+          ws_override.display_order as ws_display_order
+        FROM client_profile_fields cpf
+        LEFT JOIN client_profile_fields ws_override
+          ON ws_override.field_key = cpf.field_key
+          AND ws_override.workspace_id = ?
+        WHERE cpf.workspace_id IS NULL
+          AND COALESCE(ws_override.is_active, cpf.is_active) = TRUE
+        ORDER BY COALESCE(ws_override.display_order, cpf.display_order) ASC`;
+      params = [workspaceId];
+    }
+
+    const [fields] = await req.db.query(query, params);
 
     // Agregar info de si la columna existe realmente
+    // Campos de la tabla users (source_table='users') siempre son protegidos
     const enrichedFields = (fields as any[]).map(f => ({
       ...f,
-      column_exists: existingColumns.includes(f.field_key.toLowerCase()),
-      is_protected: SYSTEM_COLUMNS.includes(f.field_key)
+      column_exists: f.source_table === 'users' || existingColumns.includes(f.field_key.toLowerCase()),
+      is_protected: SYSTEM_COLUMNS.includes(f.field_key) || f.source_table === 'users'
     }));
 
     res.json(enrichedFields);
@@ -132,27 +163,23 @@ export const getAllClientFields: RequestHandler = async (req: any, res: any) => 
 
 /**
  * POST /api/client-fields
- * Crear nuevo campo - SOLO desde vista global (crea columna real)
+ * Crear nuevo campo - crea columna real y configura visibilidad
  */
 export const createClientField: RequestHandler = async (req: any, res: any) => {
   const {
     fieldKey, fieldLabel, fieldType, placeholder,
-    isRequired, showInRegistration, showInList,
-    selectOptions, validationPattern
+    isRequired, showInRegistration,
+    selectOptions, validationPattern,
+    applyToAllWorkspaces  // Si es false, solo se activa en el workspace actual
   } = req.body;
 
   const workspaceId = req.workspaceId;
+  const isGlobal = !workspaceId || req.isConsolidatedView || applyToAllWorkspaces;
 
-  // Solo se pueden crear campos desde vista global/consolidada
-  // O si no hay workspace específico
-  if (workspaceId && !req.isConsolidatedView) {
-    return res.status(403).json({
-      error: 'Los campos solo se pueden crear desde la vista General. Los workspaces específicos solo pueden modificar la configuración.'
-    });
-  }
-
-  // Validar nombre de columna
-  const columnName = fieldKey.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+  // Validar nombre de columna (generado automáticamente desde fieldLabel)
+  const columnName = (fieldKey || fieldLabel).toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')  // Quitar acentos
+    .replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
   if (!isValidColumnName(columnName)) {
     return res.status(400).json({
       error: 'Nombre de campo inválido. Use solo letras minúsculas, números y guión bajo. Debe empezar con letra.'
@@ -191,10 +218,13 @@ export const createClientField: RequestHandler = async (req: any, res: any) => {
     );
 
     // 3. Registrar en client_profile_fields (configuración base)
+    // Si NO es global, el campo base se crea inactivo y luego se activa solo en el workspace actual
+    const baseIsActive = isGlobal;
+
     const [result]: any = await req.db.query(
       `INSERT INTO client_profile_fields
        (workspace_id, field_key, field_label, field_type, placeholder,
-        is_required, show_in_registration, show_in_list,
+        is_required, show_in_registration, is_active,
         select_options, validation_pattern, display_order, column_type, column_exists)
        VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)`,
       [
@@ -202,9 +232,9 @@ export const createClientField: RequestHandler = async (req: any, res: any) => {
         fieldLabel,
         fieldType || 'text',
         placeholder || null,
-        isRequired || false,
-        showInRegistration !== false,
-        showInList || false,
+        isGlobal ? (isRequired || false) : false,           // Si no es global, base no es requerido
+        isGlobal ? (showInRegistration !== false) : false,  // Si no es global, base no muestra en registro
+        baseIsActive,
         selectOptions ? JSON.stringify(selectOptions) : null,
         validationPattern || null,
         maxOrder.next_order,
@@ -212,7 +242,28 @@ export const createClientField: RequestHandler = async (req: any, res: any) => {
       ]
     );
 
-    // 4. Registrar en tabla de columnas
+    // 4. Si NO es global, crear override para el workspace actual con la configuración especificada
+    if (!isGlobal && workspaceId) {
+      await req.db.query(
+        `INSERT INTO client_profile_fields
+         (workspace_id, field_key, field_label, field_type, placeholder,
+          is_required, show_in_registration, is_active, display_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?, TRUE, ?)`,
+        [
+          workspaceId,
+          columnName,
+          fieldLabel,
+          fieldType || 'text',
+          placeholder || null,
+          isRequired || false,
+          showInRegistration !== false,
+          maxOrder.next_order
+        ]
+      );
+      console.log(`[CLIENT-FIELDS] Campo ${columnName} activado solo en workspace ${workspaceId}`);
+    }
+
+    // 5. Registrar en tabla de columnas
     await req.db.query(
       `INSERT IGNORE INTO client_profile_columns (column_name, column_type, is_system, created_by_user_id)
        VALUES (?, ?, 0, ?)`,
@@ -223,7 +274,9 @@ export const createClientField: RequestHandler = async (req: any, res: any) => {
       success: true,
       id: result.insertId,
       columnName,
-      message: `Campo "${fieldLabel}" creado correctamente. Columna ${columnName} agregada a la tabla.`
+      message: isGlobal
+        ? `Campo "${fieldLabel}" creado y activado en todos los workspaces.`
+        : `Campo "${fieldLabel}" creado y activado solo en el workspace actual.`
     });
   } catch (error: any) {
     console.error('Error creando campo:', error);
@@ -258,15 +311,17 @@ export const updateClientField: RequestHandler = async (req: any, res: any) => {
       return res.status(404).json({ error: 'Campo no encontrado' });
     }
 
-    // Si es un campo del sistema, solo permitir cambios de visualización
+    // Si es un campo del sistema, solo permitir cambios de visibilidad (NO de requerido - siempre son requeridos)
     if (SYSTEM_COLUMNS.includes(field.field_key)) {
-      const allowedUpdates = ['showInList', 'showInRegistration', 'displayOrder', 'isActive'];
+      const allowedUpdates = ['showInRegistration', 'displayOrder', 'isActive'];
       const hasDisallowedUpdates = Object.keys(updates).some(k => !allowedUpdates.includes(k));
       if (hasDisallowedUpdates) {
         return res.status(403).json({
-          error: 'Este es un campo del sistema. Solo se puede modificar visibilidad y orden.'
+          error: 'Este es un campo del sistema. Solo se puede modificar visibilidad en registro y estado.'
         });
       }
+      // Forzar is_required = true para campos del sistema
+      updates.isRequired = true;
     }
 
     // Si estamos en un workspace específico, crear/actualizar override
@@ -286,9 +341,9 @@ export const updateClientField: RequestHandler = async (req: any, res: any) => {
         await req.db.query(
           `INSERT INTO client_profile_fields
            (workspace_id, field_key, field_label, field_type, placeholder,
-            is_required, show_in_registration, show_in_list,
+            is_required, show_in_registration,
             select_options, validation_pattern, display_order)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             workspaceId,
             field.field_key,
@@ -297,7 +352,6 @@ export const updateClientField: RequestHandler = async (req: any, res: any) => {
             updates.placeholder ?? field.placeholder,
             updates.isRequired ?? field.is_required,
             updates.showInRegistration ?? field.show_in_registration,
-            updates.showInList ?? field.show_in_list,
             field.select_options,
             field.validation_pattern,
             updates.displayOrder ?? field.display_order
@@ -350,7 +404,6 @@ async function updateFieldRecord(db: any, id: number, updates: any) {
     isRequired: 'is_required',
     isActive: 'is_active',
     showInRegistration: 'show_in_registration',
-    showInList: 'show_in_list',
     selectOptions: 'select_options',
     validationPattern: 'validation_pattern',
     displayOrder: 'display_order'
@@ -685,11 +738,11 @@ export const createClient: RequestHandler = async (req: any, res: any) => {
     // Hash de contraseña
     const hashedPassword = await bcrypt.hash(password || 'Cliente123!', 10);
 
-    // Crear usuario
+    // Crear usuario (solo datos esenciales: id, nit, nombre, email, FK, auditoría)
     const [userResult]: any = await req.db.query(
-      `INSERT INTO users (email, password_hash, full_name, nit, phone_number, role, is_active)
-       VALUES (?, ?, ?, ?, ?, 'client', TRUE)`,
-      [email, hashedPassword, fullName, nit || null, phoneNumber || null]
+      `INSERT INTO users (email, password_hash, full_name, nit, role, is_active)
+       VALUES (?, ?, ?, ?, 'client', TRUE)`,
+      [email, hashedPassword, fullName, nit || null]
     );
 
     const userId = userResult.insertId;
@@ -699,11 +752,17 @@ export const createClient: RequestHandler = async (req: any, res: any) => {
     const profileUpdates: string[] = ['user_id', 'workspace_id'];
     const profileValues: any[] = [userId, workspaceId || null];
 
+    // Agregar phone_number al perfil si existe
+    if (phoneNumber && existingColumns.includes('phone_number')) {
+      profileUpdates.push('`phone_number`');
+      profileValues.push(phoneNumber);
+    }
+
     // Agregar campos del body que correspondan a columnas existentes
     const allFields = { ...customFields, ...dynamicFields };
     for (const [key, value] of Object.entries(allFields)) {
       const colName = key.toLowerCase();
-      if (existingColumns.includes(colName) && !['user_id', 'workspace_id'].includes(colName)) {
+      if (existingColumns.includes(colName) && !['user_id', 'workspace_id', 'phone_number'].includes(colName)) {
         profileUpdates.push(`\`${colName}\``);
         profileValues.push(value ?? null);
       }

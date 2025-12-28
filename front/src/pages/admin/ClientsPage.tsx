@@ -16,7 +16,6 @@ interface ClientField {
   placeholder: string | null;
   is_required: boolean;
   show_in_registration: boolean;
-  show_in_list: boolean;
   select_options: string[] | null;
 }
 
@@ -376,24 +375,54 @@ export default function ClientsPage() {
   };
 
   // Helper para obtener estilos de infracción por cliente
-  // Obtiene colores de infracción - solo fondo, el texto se maneja por CSS variable
-  const getInfractionStyle = (count: number): { bg: string; text: string } => {
+  // Usa colores configurados por nivel en el workspace
+  const getInfractionStyle = (count: number): { bg: string; text: string; isLight: boolean } => {
+    const ws = currentWorkspace as any;
+    const maxInfractions = ws?.max_infractions || 3;
+
+    // Sin infracciones - usar color normal (transparente para tema oscuro)
     if (count === 0) {
-      return {
-        bg: currentWorkspace?.infraction_color_0_bg || '',
-        text: currentWorkspace?.infraction_color_0_text || ''
-      };
+      return { bg: 'transparent', text: '#FFFFFF', isLight: false };
     }
-    if (count === 1) {
-      return {
-        bg: currentWorkspace?.infraction_color_1_bg || '#FEF3C7',
-        text: currentWorkspace?.infraction_color_1_text || '#92400E'
-      };
+
+    // Limitar el nivel al máximo configurado
+    const level = Math.min(count, maxInfractions);
+
+    // Intentar obtener color configurado para este nivel
+    const bgKey = `infraction_color_${level}_bg`;
+    const textKey = `infraction_color_${level}_text`;
+
+    let bgColor = ws?.[bgKey];
+    let textColor = ws?.[textKey];
+
+    // Si no hay color configurado, usar template clásico por defecto
+    if (!bgColor || !textColor) {
+      const ratio = level / maxInfractions;
+      if (ratio <= 0.33) {
+        bgColor = '#FEF3C7'; textColor = '#92400E'; // Amarillo suave
+      } else if (ratio <= 0.66) {
+        bgColor = '#FED7AA'; textColor = '#9A3412'; // Naranja suave
+      } else {
+        bgColor = '#FEE2E2'; textColor = '#991B1B'; // Rojo suave
+      }
     }
-    return {
-      bg: currentWorkspace?.infraction_color_2_bg || '#FEE2E2',
-      text: currentWorkspace?.infraction_color_2_text || '#991B1B'
-    };
+
+    // Determinar si el fondo es claro (para ajustar visibilidad de botones)
+    const isLight = bgColor ? isLightColor(bgColor) : false;
+
+    return { bg: bgColor, text: textColor, isLight };
+  };
+
+  // Helper para determinar si un color es claro
+  const isLightColor = (hexColor: string): boolean => {
+    if (!hexColor || hexColor === 'transparent') return false;
+    const hex = hexColor.replace('#', '');
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    // Fórmula de luminosidad
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return luminance > 0.5;
   };
 
   const toggleAllClients = () => {
@@ -662,6 +691,12 @@ export default function ClientsPage() {
                 {clients.map((client) => {
                   const infStyle = getInfractionStyle(client.active_infractions_count || 0);
                   const hasInfractions = (client.active_infractions_count || 0) > 0;
+
+                  // Clases para botones en filas claras
+                  const actionBtnClass = infStyle.isLight
+                    ? 'px-1.5 py-0.5 rounded bg-slate-800/80 border border-slate-600'
+                    : '';
+
                   return (
                   <tr
                     key={client.id}
@@ -673,23 +708,23 @@ export default function ClientsPage() {
                         type="checkbox"
                         checked={selectedClients.includes(client.id)}
                         onChange={() => toggleClientSelection(client.id)}
-                        className="rounded border-slate-600 bg-slate-700 text-orange-600"
+                        className={`rounded text-orange-600 ${infStyle.isLight ? 'border-slate-500 bg-white' : 'border-slate-600 bg-slate-700'}`}
                       />
                     </td>
                     <td className="px-4 py-3">
                       <span
                         className="font-medium cursor-pointer hover:underline"
-                        style={{ color: hasInfractions ? infStyle.text : undefined }}
+                        style={{ color: infStyle.text }}
                         onClick={() => window.location.href = `/admin/clients/${client.id}`}
                       >
                         {client.full_name}
                       </span>
-                      <p className="text-sm" style={{ color: hasInfractions ? infStyle.text : '#94a3b8', opacity: hasInfractions ? 0.8 : 1 }}>
+                      <p className="text-sm" style={{ color: infStyle.text, opacity: hasInfractions ? 0.8 : 0.7 }}>
                         {client.email}
                       </p>
                     </td>
-                    <td className="px-4 py-3" style={{ color: hasInfractions ? infStyle.text : '#cbd5e1' }}>{client.nit || '-'}</td>
-                    <td className="px-4 py-3" style={{ color: hasInfractions ? infStyle.text : '#cbd5e1' }}>{client.phone_number || '-'}</td>
+                    <td className="px-4 py-3" style={{ color: infStyle.text }}>{client.nit || '-'}</td>
+                    <td className="px-4 py-3" style={{ color: infStyle.text }}>{client.phone_number || '-'}</td>
                     <td className="px-4 py-3">
                       <select
                         value={client.assigned_to_user_id || ""}
@@ -697,7 +732,11 @@ export default function ClientsPage() {
                           const userId = e.target.value ? parseInt(e.target.value) : null;
                           assignMutation.mutate({ clientId: client.id, userId });
                         }}
-                        className="px-2 py-1 bg-slate-800 border border-slate-600 rounded text-white text-sm"
+                        className={`px-2 py-1 rounded text-sm ${
+                          infStyle.isLight
+                            ? 'bg-slate-800 border border-slate-500 text-white'
+                            : 'bg-slate-800 border border-slate-600 text-white'
+                        }`}
                       >
                         <option value="">Pool</option>
                         {employees.map((emp: Employee) => (
@@ -707,23 +746,25 @@ export default function ClientsPage() {
                     </td>
                     <td className="px-4 py-3 text-center">
                       <span className={`px-2 py-1 text-xs rounded ${
-                        client.is_active ? 'bg-green-900/50 text-green-300' : 'bg-red-900/50 text-red-300'
+                        client.is_active ? 'bg-green-900/80 text-green-300 border border-green-700' : 'bg-red-900/80 text-red-300 border border-red-700'
                       }`}>
                         {client.is_active ? 'Activo' : 'Inactivo'}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <div className="flex justify-center gap-2">
+                      <div className={`inline-flex justify-center gap-1 ${infStyle.isLight ? 'bg-slate-800/90 rounded-lg px-2 py-1 border border-slate-600' : ''}`}>
                         <button
                           onClick={() => handleEditProfile(client)}
-                          className="text-sm text-blue-400 hover:text-blue-300"
+                          className={`text-sm hover:opacity-80 ${actionBtnClass}`}
+                          style={{ color: infStyle.isLight ? '#60A5FA' : undefined }}
                           title="Editar"
                         >
                           ✏️
                         </button>
                         <button
                           onClick={() => handleResetPassword(client)}
-                          className="text-sm text-yellow-400 hover:text-yellow-300"
+                          className={`text-sm hover:opacity-80 ${actionBtnClass}`}
+                          style={{ color: infStyle.isLight ? '#FBBF24' : undefined }}
                           title="Restablecer Contraseña"
                         >
                           🔑
@@ -734,7 +775,8 @@ export default function ClientsPage() {
                               setInfractionClient(client);
                               setShowInfractionModal(true);
                             }}
-                            className="text-sm text-red-400 hover:text-red-300"
+                            className={`text-sm hover:opacity-80 ${actionBtnClass}`}
+                            style={{ color: infStyle.isLight ? '#F87171' : undefined }}
                             title="Registrar Infraccion"
                           >
                             ⚠️
@@ -746,10 +788,11 @@ export default function ClientsPage() {
                               setHistoryClient(client);
                               setShowHistoryModal(true);
                             }}
-                            className="text-sm text-amber-400 hover:text-amber-300 flex items-center gap-1"
+                            className={`text-sm hover:opacity-80 flex items-center gap-1 ${actionBtnClass}`}
+                            style={{ color: infStyle.isLight ? '#FB923C' : undefined }}
                             title={`Ver ${client.active_infractions_count} infracción(es)`}
                           >
-                            📋 {client.active_infractions_count}
+                            📋 <span className="font-bold">{client.active_infractions_count}</span>
                           </button>
                         )}
                       </div>

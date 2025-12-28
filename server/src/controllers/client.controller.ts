@@ -20,8 +20,9 @@ export async function listClients(req: Request, res: Response) {
   const userId = (req as any).user?.id;
 
   let query = `
-    SELECT u.id, u.full_name, u.email, u.phone_number, u.nit, u.role, u.is_active,
-           cp.workspace_id, w.name as workspace_name, w.color as workspace_color
+    SELECT u.id, u.full_name, u.email, u.nit, u.role, u.is_active,
+           cp.phone_number, cp.workspace_id, cp.active_infractions_count,
+           w.name as workspace_name, w.color as workspace_color
     FROM users u
     LEFT JOIN clients_profiles cp ON cp.user_id = u.id
     LEFT JOIN workspaces w ON w.id = cp.workspace_id
@@ -58,13 +59,13 @@ if (me.role === "client" && Number(me.sub) !== Number(id)) return res.status(403
 
 
 const [[client]]: any = await req.db!.query(
-`SELECT id, full_name, email, phone_number, nit, role, is_active FROM users WHERE id=? AND role='client'`, [id]
+`SELECT id, full_name, email, nit, role, is_active FROM users WHERE id=? AND role='client'`, [id]
 );
 if (!client) return res.status(404).json({ message: "Cliente no encontrado" });
 
 
 const [[profile]]: any = await req.db!.query(
-`SELECT contract_number, overall_rating, notes FROM clients_profiles WHERE user_id=?`, [id]
+`SELECT contract_number, overall_rating, notes, phone_number, birth_date FROM clients_profiles WHERE user_id=?`, [id]
 );
 
 
@@ -165,19 +166,32 @@ export async function getClientDashboard(req: Request, res: Response) {
     [clientId]
   );
 
-  // Información del perfil
+  // Información del perfil con saldo y infracciones
   const [profile] = await req.db!.query(
-    `SELECT cp.overall_rating, u.full_name, u.nit, u.email, u.phone_number
+    `SELECT cp.overall_rating, cp.phone_number, cp.account_balance, cp.active_infractions_count,
+            u.full_name, u.nit, u.email, u.is_active, u.services_disabled_by_infractions
      FROM users u
      LEFT JOIN clients_profiles cp ON cp.user_id = u.id
      WHERE u.id = ?`,
     [clientId]
   );
 
+  // Infracciones activas del cliente
+  const [infractions] = await req.db!.query(
+    `SELECT ci.id, ci.infraction_type, ci.reason, ci.created_at,
+            ci.related_invoice_id, mi.invoice_year, mi.invoice_month
+     FROM client_infractions ci
+     LEFT JOIN monthly_invoices mi ON mi.id = ci.related_invoice_id
+     WHERE ci.client_user_id = ? AND ci.is_active = TRUE
+     ORDER BY ci.created_at DESC`,
+    [clientId]
+  );
+
   res.json({
     invoices,
     services,
-    profile: (profile as any[])[0] || null
+    profile: (profile as any[])[0] || null,
+    infractions
   });
 }
 

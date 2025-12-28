@@ -152,29 +152,28 @@ export class WorkspaceService {
       updates.push('max_infractions = ?');
       params.push(data.max_infractions);
     }
-    if (data.infraction_color_0_bg !== undefined) {
-      updates.push('infraction_color_0_bg = ?');
-      params.push(data.infraction_color_0_bg || null);
+    if (data.auto_deactivate_on_limit !== undefined) {
+      updates.push('auto_deactivate_on_limit = ?');
+      params.push(data.auto_deactivate_on_limit);
     }
-    if (data.infraction_color_0_text !== undefined) {
-      updates.push('infraction_color_0_text = ?');
-      params.push(data.infraction_color_0_text || null);
+    if (data.infraction_color_scheme !== undefined) {
+      updates.push('infraction_color_scheme = ?');
+      params.push(data.infraction_color_scheme);
     }
-    if (data.infraction_color_1_bg !== undefined) {
-      updates.push('infraction_color_1_bg = ?');
-      params.push(data.infraction_color_1_bg);
-    }
-    if (data.infraction_color_1_text !== undefined) {
-      updates.push('infraction_color_1_text = ?');
-      params.push(data.infraction_color_1_text);
-    }
-    if (data.infraction_color_2_bg !== undefined) {
-      updates.push('infraction_color_2_bg = ?');
-      params.push(data.infraction_color_2_bg);
-    }
-    if (data.infraction_color_2_text !== undefined) {
-      updates.push('infraction_color_2_text = ?');
-      params.push(data.infraction_color_2_text);
+
+    // Colores de infracción dinámicos (niveles 1-10)
+    for (let i = 1; i <= 10; i++) {
+      const bgKey = `infraction_color_${i}_bg` as keyof UpdateWorkspaceDTO;
+      const textKey = `infraction_color_${i}_text` as keyof UpdateWorkspaceDTO;
+
+      if (data[bgKey] !== undefined) {
+        updates.push(`infraction_color_${i}_bg = ?`);
+        params.push(data[bgKey] || null);
+      }
+      if (data[textKey] !== undefined) {
+        updates.push(`infraction_color_${i}_text = ?`);
+        params.push(data[textKey] || null);
+      }
     }
 
     if (updates.length === 0) return;

@@ -33,6 +33,8 @@ import clientFieldsRoutes from "./routes/client-fields.routes";
 import bulkAssignmentRoutes from "./routes/bulk-assignment.routes";
 import expenseCategoriesRoutes from "./routes/expense-categories.routes";
 import statsRoutes from "./routes/stats.routes";
+import cashPaymentsRoutes from "./routes/cash-payments.routes";
+import externalIncomesRoutes from "./routes/external-incomes.routes";
 
 
 import { resolveTenant } from "./middleware/resolveTenant";
@@ -117,6 +119,8 @@ app.use("/api/client-fields", clientFieldsRoutes);
 app.use("/api/bulk-assignment", bulkAssignmentRoutes);
 app.use("/api/expense-categories", expenseCategoriesRoutes);
 app.use("/api/stats", statsRoutes);
+app.use("/api/cash-payments", cashPaymentsRoutes);
+app.use("/api/external-incomes", externalIncomesRoutes);
 
 
 app.use(errorHandler);

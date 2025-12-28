@@ -102,11 +102,7 @@ export const updateWorkspace: RequestHandler = async (req: any, res) => {
     const { id } = req.params;
     const {
       name, description, color, icon, is_active,
-      // Nuevos campos de configuración de infracciones
-      max_infractions,
-      infraction_color_0_bg, infraction_color_0_text,
-      infraction_color_1_bg, infraction_color_1_text,
-      infraction_color_2_bg, infraction_color_2_text
+      max_infractions, auto_deactivate_on_limit, infraction_color_scheme
     } = req.body;
 
     // Verificar que tenga rol de admin u owner en el workspace
@@ -115,13 +111,20 @@ export const updateWorkspace: RequestHandler = async (req: any, res) => {
       return res.status(403).json({ message: 'No tienes permisos para modificar este workspace' });
     }
 
-    await workspaceService.updateWorkspace(Number(id), {
+    // Construir objeto de actualización con colores dinámicos (niveles 1-10)
+    const updateData: any = {
       name, description, color, icon, is_active,
-      max_infractions,
-      infraction_color_0_bg, infraction_color_0_text,
-      infraction_color_1_bg, infraction_color_1_text,
-      infraction_color_2_bg, infraction_color_2_text
-    });
+      max_infractions, auto_deactivate_on_limit, infraction_color_scheme
+    };
+
+    for (let i = 1; i <= 10; i++) {
+      const bgKey = `infraction_color_${i}_bg`;
+      const textKey = `infraction_color_${i}_text`;
+      if (req.body[bgKey] !== undefined) updateData[bgKey] = req.body[bgKey];
+      if (req.body[textKey] !== undefined) updateData[textKey] = req.body[textKey];
+    }
+
+    await workspaceService.updateWorkspace(Number(id), updateData);
 
     const workspace = await workspaceService.getWorkspaceById(Number(id));
 

@@ -1,9 +1,10 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useEffect, useRef } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import api from "../../lib/api";
 import { ResponsiveContainer, PieChart, Pie, Cell, Legend, Tooltip } from "recharts";
 import { money } from "../../utils/format";
+import { useWorkspace } from "../../context/WorkspaceContext";
 
 type Summary = {
   period: { year: number; month: number };
@@ -38,15 +39,77 @@ export default function AdminDashboard(){
   const currentDate = new Date();
   const [selectedYear, setSelectedYear] = useState(currentDate.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(currentDate.getMonth() + 1);
+  const { workspaces, currentWorkspace, isConsolidatedView, setConsolidatedView, switchWorkspace } = useWorkspace();
+  // Usar isConsolidatedView del contexto como fuente de verdad
+  const [showAllWorkspaces, setShowAllWorkspaces] = useState(() => {
+    // Inicializar desde localStorage para tener el valor correcto inmediatamente
+    return localStorage.getItem('consolidatedView') === 'true';
+  });
+  const queryClient = useQueryClient();
+
+  // Ref para guardar el workspace al que volver y si activamos consolidated
+  const previousWorkspaceRef = useRef(currentWorkspace);
+  const activatedConsolidatedRef = useRef(false);
+
+  // Sincronizar estado local con el contexto
+  useEffect(() => {
+    setShowAllWorkspaces(isConsolidatedView);
+  }, [isConsolidatedView]);
+
+  // Guardar el workspace actual cuando se monta el componente
+  useEffect(() => {
+    if (currentWorkspace) {
+      previousWorkspaceRef.current = currentWorkspace;
+    }
+  }, [currentWorkspace]);
+
+  // Al salir de la página, restaurar al workspace anterior si activamos consolidated
+  useEffect(() => {
+    return () => {
+      if (activatedConsolidatedRef.current) {
+        setConsolidatedView(false);
+        if (previousWorkspaceRef.current) {
+          switchWorkspace(previousWorkspaceRef.current);
+        }
+      }
+    };
+  }, [setConsolidatedView, switchWorkspace]);
+
+  const handleToggleAllWorkspaces = () => {
+    const newValue = !showAllWorkspaces;
+    setShowAllWorkspaces(newValue);
+
+    // Actualizar localStorage ANTES de cambiar estado del contexto
+    if (newValue) {
+      localStorage.setItem('consolidatedView', 'true');
+      localStorage.removeItem('currentWorkspace');
+    } else {
+      localStorage.removeItem('consolidatedView');
+      // Restaurar workspace anterior si existe
+      if (previousWorkspaceRef.current) {
+        localStorage.setItem('currentWorkspace', previousWorkspaceRef.current.slug);
+      }
+    }
+
+    setConsolidatedView(newValue);
+    activatedConsolidatedRef.current = newValue;
+
+    // Usar timeout para asegurar que localStorage está actualizado antes del refetch
+    setTimeout(() => {
+      queryClient.invalidateQueries({ queryKey: ["task-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-projections"] });
+    }, 50);
+  };
 
   // Stats generales de tareas
   const { data: taskStats } = useQuery({
-    queryKey:["task-stats"],
+    queryKey:["task-stats", showAllWorkspaces],
     queryFn: async ()=> (await api.get('/stats')).data
   });
 
   const { data } = useQuery({
-    queryKey:["admin-summary", selectedYear, selectedMonth],
+    queryKey:["admin-summary", selectedYear, selectedMonth, showAllWorkspaces],
     queryFn: async ()=> {
       const params = new URLSearchParams();
       params.append("year", String(selectedYear));
@@ -57,7 +120,7 @@ export default function AdminDashboard(){
 
   // Proyecciones financieras
   const { data: projections } = useQuery({
-    queryKey:["admin-projections", selectedYear, selectedMonth],
+    queryKey:["admin-projections", selectedYear, selectedMonth, showAllWorkspaces],
     queryFn: async ()=> {
       const params = new URLSearchParams();
       params.append("year", String(selectedYear));
@@ -144,9 +207,19 @@ export default function AdminDashboard(){
       )}
 
       <div className="flex items-center justify-between flex-wrap gap-4">
-        <h1 className="text-2xl font-semibold text-white">Dashboard Financiero</h1>
+        <div>
+          <h1 className="text-2xl font-semibold text-white">Dashboard Financiero</h1>
+          {showAllWorkspaces && (
+            <p className="text-sm text-purple-400 mt-1 flex items-center gap-2">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Vista General - Todos los workspaces
+            </p>
+          )}
+        </div>
 
-        {/* Filtros de Fecha */}
+        {/* Filtros de Fecha y Toggle */}
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             <label className="text-sm font-medium text-slate-300">Mes:</label>
@@ -187,6 +260,23 @@ export default function AdminDashboard(){
           >
             Mes Actual
           </button>
+
+          {/* Toggle para ver todos los workspaces */}
+          {workspaces.length > 1 && (
+            <button
+              onClick={handleToggleAllWorkspaces}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all ${
+                showAllWorkspaces
+                  ? 'bg-purple-900/30 border-purple-600 text-purple-300'
+                  : 'bg-slate-800 border-slate-600 text-slate-300 hover:border-purple-500'
+              }`}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              {showAllWorkspaces ? 'Ver solo este workspace' : 'Ver todos'}
+            </button>
+          )}
         </div>
       </div>
 

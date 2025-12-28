@@ -37,8 +37,10 @@ export function InfractionModal({ client, invoices = [], onClose, onSuccess }: I
       queryClient.invalidateQueries({ queryKey: ["clients"] });
 
       const message = response.data?.clientDeactivated
-        ? "Infraccion registrada. El cliente ha sido desactivado por alcanzar 3 infracciones."
-        : "Infraccion registrada correctamente.";
+        ? "Infracción registrada. El cliente ha sido desactivado por alcanzar el límite de infracciones."
+        : response.data?.limitReached
+          ? "Infracción registrada. El cliente ha alcanzado el límite de infracciones."
+          : "Infracción registrada correctamente.";
 
       alert(message);
       onSuccess?.();
@@ -47,10 +49,17 @@ export function InfractionModal({ client, invoices = [], onClose, onSuccess }: I
     onError: (error: any) => {
       const errorData = error?.response?.data;
 
-      // Manejo especial: advertencia de 3a infraccion
+      // Manejo especial: advertencia de desactivación
       if (errorData?.error === 'warning_third_infraction') {
         setWarningMessage(errorData.message);
         setShowConfirmation(true);
+        return;
+      }
+
+      // Manejo especial: límite alcanzado (no se pueden agregar más)
+      if (errorData?.error === 'limit_reached') {
+        alert(`⛔ ${errorData.message}`);
+        onClose();
         return;
       }
 
@@ -153,12 +162,6 @@ export function InfractionModal({ client, invoices = [], onClose, onSuccess }: I
                 </div>
               )}
 
-              {/* Info sobre infracciones */}
-              <div className="bg-amber-900/30 border border-amber-700 rounded-lg p-3">
-                <p className="text-amber-200 text-sm">
-                  <strong>Nota:</strong> Al alcanzar 3 infracciones activas, el cliente sera desactivado automaticamente.
-                </p>
-              </div>
             </>
           )}
         </div>

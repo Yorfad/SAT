@@ -92,6 +92,42 @@ export async function generateMonthlyTasks(tenantSlug: string, targetYear?: numb
         // Crear nueva factura
         const totalDue = services.reduce((sum, s) => sum + (s.custom_price || s.default_price), 0);
 
+        // Verificar si el cliente tiene saldo prepagado
+        const [clientBalance]: any = await db.query(`
+          SELECT account_balance FROM clients_profiles WHERE user_id = ?
+        `, [clientId]);
+
+        const prepaidBalance = parseFloat(clientBalance[0]?.account_balance || 0);
+
+        // Calcular cuánto del saldo aplicar
+        let amountPaid = 0;
+        let invoiceBalance = totalDue;
+        let paymentStatus = 'pending';
+        let remainingBalance = prepaidBalance;
+
+        if (prepaidBalance > 0 && totalDue > 0) {
+          if (prepaidBalance >= totalDue) {
+            // Saldo cubre toda la factura
+            amountPaid = totalDue;
+            invoiceBalance = 0;
+            paymentStatus = 'paid';
+            remainingBalance = prepaidBalance - totalDue;
+          } else {
+            // Saldo cubre parcialmente
+            amountPaid = prepaidBalance;
+            invoiceBalance = totalDue - prepaidBalance;
+            paymentStatus = 'partial';
+            remainingBalance = 0;
+          }
+
+          // Actualizar saldo del cliente
+          await db.query(`
+            UPDATE clients_profiles SET account_balance = ? WHERE user_id = ?
+          `, [remainingBalance, clientId]);
+
+          console.log(`[${tenantSlug}] Cliente ${clientId}: Aplicado Q${amountPaid} de saldo prepagado a factura ${year}/${month}`);
+        }
+
         const [invoiceResult]: any = await db.query(`
           INSERT INTO monthly_invoices (
             client_user_id,
@@ -104,8 +140,8 @@ export async function generateMonthlyTasks(tenantSlug: string, targetYear?: numb
             amount_paid,
             balance,
             payment_status
-          ) VALUES (?, ?, ?, 0, ?, 0, ?, 0, ?, 'pending')
-        `, [clientId, year, month, totalDue, totalDue, totalDue]);
+          ) VALUES (?, ?, ?, 0, ?, 0, ?, ?, ?, ?)
+        `, [clientId, year, month, totalDue, totalDue, amountPaid, invoiceBalance, paymentStatus]);
 
         invoiceId = invoiceResult.insertId;
         invoicesCreated++;

@@ -117,12 +117,19 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       setCurrentWorkspace(null);
       localStorage.setItem('consolidatedView', 'true');
       localStorage.removeItem('currentWorkspace');
+    } else {
+      // Al desactivar vista consolidada, limpiar el flag
+      localStorage.removeItem('consolidatedView');
     }
 
-    // Invalidar queries
+    // Invalidar queries relevantes
     queryClient.invalidateQueries({ queryKey: ['clients'] });
     queryClient.invalidateQueries({ queryKey: ['admin-summary'] });
+    queryClient.invalidateQueries({ queryKey: ['admin-projections'] });
     queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    queryClient.invalidateQueries({ queryKey: ['task-stats'] });
+    queryClient.invalidateQueries({ queryKey: ['expenses'] });
+    queryClient.invalidateQueries({ queryKey: ['expense-categories'] });
   }, [queryClient]);
 
   const getCurrentWorkspaceSlug = useCallback(() => {

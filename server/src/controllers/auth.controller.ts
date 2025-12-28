@@ -29,19 +29,20 @@ export async function register(req: Request, res: Response) {
   const { email, password, full_name, nit, role = "client", birth_date = null, phone_number = null, workspace_id = null } = req.body;
   const hash = await bcrypt.hash(password, 10);
   try {
+    // Crear usuario (solo datos esenciales: id, nit, nombre, email, rol, auditoría)
     const [r] = await db.query(
-      `INSERT INTO users (email,password_hash,full_name,nit,role,birth_date,phone_number) VALUES (?,?,?,?,?,?,?)`,
-      [email, hash, full_name, nit, role, birth_date, phone_number]
+      `INSERT INTO users (email,password_hash,full_name,nit,role) VALUES (?,?,?,?,?)`,
+      [email, hash, full_name, nit, role]
     );
 
     const userId = (r as any).insertId;
 
-    // Si es cliente, crear perfil y asignar servicios por defecto
+    // Si es cliente, crear perfil con datos adicionales y asignar servicios por defecto
     if (role === 'client') {
       await db.query(
-        `INSERT INTO clients_profiles (user_id, workspace_id, overall_rating)
-         VALUES (?, ?, 5.00)`,
-        [userId, workspace_id]
+        `INSERT INTO clients_profiles (user_id, workspace_id, overall_rating, phone_number, birth_date)
+         VALUES (?, ?, 5.00, ?, ?)`,
+        [userId, workspace_id, phone_number, birth_date]
       );
 
       // Auto-asignar servicios por defecto
@@ -150,9 +151,9 @@ export async function clientLogin(req: Request, res: Response) {
   // Buscar usuario cliente por NIT
   const [rows] = await db.query(
     `SELECT u.id, u.email, u.password_hash, u.full_name, u.role, u.nit, u.is_active,
-            u.deactivation_reason, u.deactivated_at, u.phone_number,
+            u.deactivation_reason, u.deactivated_at,
             u.must_change_password, u.password_changed_at,
-            cp.overall_rating
+            cp.overall_rating, cp.phone_number
      FROM users u
      LEFT JOIN clients_profiles cp ON cp.user_id = u.id
      WHERE u.nit = ? AND u.role = 'client'
@@ -324,22 +325,22 @@ export async function clientRegister(req: Request, res: Response) {
   const isActive = invitation.auto_approve ? 1 : 0;
 
   try {
-    // 5. Crear usuario cliente
+    // 5. Crear usuario cliente (solo datos esenciales)
     const [result] = await db.query(
       `INSERT INTO users (
         email, password_hash, full_name, nit, role,
-        phone_number, is_active, registered_via_invitation_id
-      ) VALUES (?, ?, ?, ?, 'client', ?, ?, ?)`,
-      [email, hash, full_name, nit, phone_number, isActive, invitation.id]
+        is_active, registered_via_invitation_id
+      ) VALUES (?, ?, ?, ?, 'client', ?, ?)`,
+      [email, hash, full_name, nit, isActive, invitation.id]
     );
 
     const userId = (result as any).insertId;
 
     // 6. Crear perfil de cliente con campos adicionales y workspace
     await db.query(
-      `INSERT INTO clients_profiles (user_id, workspace_id, overall_rating, notes)
-       VALUES (?, ?, 5.00, ?)`,
-      [userId, invitation.workspace_id || null, address ? `Dirección: ${address}` : null]
+      `INSERT INTO clients_profiles (user_id, workspace_id, overall_rating, phone_number, birth_date, notes)
+       VALUES (?, ?, 5.00, ?, ?, ?)`,
+      [userId, invitation.workspace_id || null, phone_number, birth_date, address ? `Dirección: ${address}` : null]
     );
 
     // 7. Asignar al workspace si aplica
@@ -427,8 +428,8 @@ export async function mobileClientLogin(req: Request, res: Response) {
     try {
       const [rows] = await pool.query(
         `SELECT u.id, u.email, u.password_hash, u.full_name, u.role, u.nit, u.is_active,
-                u.deactivation_reason, u.deactivated_at, u.phone_number,
-                cp.overall_rating, cp.workspace_id
+                u.deactivation_reason, u.deactivated_at,
+                cp.overall_rating, cp.workspace_id, cp.phone_number
          FROM users u
          LEFT JOIN clients_profiles cp ON cp.user_id = u.id
          WHERE u.nit = ? AND u.role = 'client'
