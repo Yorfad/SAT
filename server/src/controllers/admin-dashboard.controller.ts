@@ -498,3 +498,320 @@ export const getFinancialOverview: RequestHandler = async (req: any, res: any) =
     res.status(500).json({ error: 'Error al obtener vista financiera' });
   }
 };
+
+/**
+ * GET /api/admin/dashboard/caja-personal
+ * Vista de Caja Personal: efectivo disponible, comprometido y por cobrar
+ */
+export const getCajaPersonal: RequestHandler = async (req: any, res: any) => {
+  const isConsolidated = req.isConsolidatedView;
+  const workspaceId = req.workspaceId;
+  let accessibleIds: number[] = [];
+
+  if (isConsolidated) {
+    const workspaceService = new WorkspaceService(req.db);
+    accessibleIds = await workspaceService.getAccessibleWorkspaceIds(req.user.id);
+  }
+
+  const wsFilterPayments = getWorkspaceFilterSQL(isConsolidated, workspaceId, accessibleIds, 'cp');
+  const wsFilterExpenses = getWorkspaceFilterSQL(isConsolidated, workspaceId, accessibleIds, '', true);
+  const wsFilterInvoices = getWorkspaceFilterSQL(isConsolidated, workspaceId, accessibleIds, 'mi');
+  const wsFilterBalances = getWorkspaceFilterSQL(isConsolidated, workspaceId, accessibleIds, 'cp');
+  const wsFilterExternal = getWorkspaceFilterSQL(isConsolidated, workspaceId, accessibleIds, 'ei');
+
+  try {
+    // ========== ENTRADAS DE EFECTIVO (histórico total) ==========
+
+    // 1. Total pagos de clientes recibidos
+    const [totalPayments]: any = await req.db.query(`
+      SELECT COALESCE(SUM(amount), 0) as total
+      FROM client_payments cp
+      WHERE 1=1 ${wsFilterPayments.sql}
+    `, [...wsFilterPayments.params]);
+
+    // 2. Total ingresos externos
+    const [totalExternalIncomes]: any = await req.db.query(`
+      SELECT COALESCE(SUM(amount), 0) as total
+      FROM external_incomes ei
+      WHERE 1=1 ${wsFilterExternal.sql}
+    `, [...wsFilterExternal.params]);
+
+    // ========== SALIDAS DE EFECTIVO ==========
+
+    // 3. Total gastos pagados
+    const [totalExpenses]: any = await req.db.query(`
+      SELECT COALESCE(SUM(amount), 0) as total
+      FROM expenses
+      WHERE is_active = TRUE ${wsFilterExpenses.sql}
+    `, [...wsFilterExpenses.params]);
+
+    // ========== COMPROMETIDO (saldos a favor de clientes) ==========
+    const [clientBalances]: any = await req.db.query(`
+      SELECT COALESCE(SUM(cp.account_balance), 0) as total
+      FROM clients_profiles cp
+      JOIN users u ON u.id = cp.user_id
+      WHERE u.role = 'client' AND cp.account_balance > 0
+      ${wsFilterBalances.sql}
+    `, [...wsFilterBalances.params]);
+
+    // ========== POR COBRAR (facturas pendientes) ==========
+    const [pendingInvoices]: any = await req.db.query(`
+      SELECT
+        COALESCE(SUM(mi.balance), 0) as total,
+        COUNT(*) as count
+      FROM monthly_invoices mi
+      WHERE mi.payment_status IN ('pending', 'partial', 'overdue')
+      ${wsFilterInvoices.sql}
+    `, [...wsFilterInvoices.params]);
+
+    // ========== CÁLCULOS ==========
+    const entradas = Number(totalPayments[0].total) + Number(totalExternalIncomes[0].total);
+    const salidas = Number(totalExpenses[0].total);
+    const comprometido = Number(clientBalances[0].total);
+    const porCobrar = Number(pendingInvoices[0].total);
+
+    // Efectivo disponible = Entradas - Salidas - Comprometido
+    const efectivoDisponible = entradas - salidas - comprometido;
+
+    // Efectivo total = Disponible + Comprometido (lo que físicamente tienes)
+    const efectivoTotal = entradas - salidas;
+
+    res.json({
+      resumen: {
+        efectivoTotal: parseFloat(efectivoTotal.toFixed(2)),
+        efectivoDisponible: parseFloat(efectivoDisponible.toFixed(2)),
+        comprometido: parseFloat(comprometido.toFixed(2)),
+        porCobrar: parseFloat(porCobrar.toFixed(2)),
+        facturasPendientes: Number(pendingInvoices[0].count)
+      },
+      detalle: {
+        entradas: {
+          pagosClientes: parseFloat(Number(totalPayments[0].total).toFixed(2)),
+          ingresosExternos: parseFloat(Number(totalExternalIncomes[0].total).toFixed(2)),
+          total: parseFloat(entradas.toFixed(2))
+        },
+        salidas: {
+          gastos: parseFloat(Number(totalExpenses[0].total).toFixed(2)),
+          total: parseFloat(salidas.toFixed(2))
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error obteniendo caja personal:', error);
+    res.status(500).json({ error: 'Error al obtener caja personal' });
+  }
+};
+
+/**
+ * GET /api/admin/dashboard/balance-general
+ * Balance General Simplificado: Activos - Pasivos = Patrimonio
+ */
+export const getBalanceGeneral: RequestHandler = async (req: any, res: any) => {
+  const isConsolidated = req.isConsolidatedView;
+  const workspaceId = req.workspaceId;
+  let accessibleIds: number[] = [];
+
+  if (isConsolidated) {
+    const workspaceService = new WorkspaceService(req.db);
+    accessibleIds = await workspaceService.getAccessibleWorkspaceIds(req.user.id);
+  }
+
+  const wsFilterPayments = getWorkspaceFilterSQL(isConsolidated, workspaceId, accessibleIds, 'cp');
+  const wsFilterExpenses = getWorkspaceFilterSQL(isConsolidated, workspaceId, accessibleIds, '', true);
+  const wsFilterInvoices = getWorkspaceFilterSQL(isConsolidated, workspaceId, accessibleIds, 'mi');
+  const wsFilterBalances = getWorkspaceFilterSQL(isConsolidated, workspaceId, accessibleIds, 'cp');
+  const wsFilterExternal = getWorkspaceFilterSQL(isConsolidated, workspaceId, accessibleIds, 'ei');
+
+  try {
+    // ========== ACTIVOS ==========
+
+    // 1. Efectivo (pagos recibidos + ingresos externos - gastos)
+    const [payments]: any = await req.db.query(`
+      SELECT COALESCE(SUM(amount), 0) as total FROM client_payments cp WHERE 1=1 ${wsFilterPayments.sql}
+    `, [...wsFilterPayments.params]);
+
+    const [externalInc]: any = await req.db.query(`
+      SELECT COALESCE(SUM(amount), 0) as total FROM external_incomes ei WHERE 1=1 ${wsFilterExternal.sql}
+    `, [...wsFilterExternal.params]);
+
+    const [expenses]: any = await req.db.query(`
+      SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE is_active = TRUE ${wsFilterExpenses.sql}
+    `, [...wsFilterExpenses.params]);
+
+    const efectivo = Number(payments[0].total) + Number(externalInc[0].total) - Number(expenses[0].total);
+
+    // 2. Cuentas por cobrar (facturas pendientes)
+    const [receivables]: any = await req.db.query(`
+      SELECT COALESCE(SUM(balance), 0) as total FROM monthly_invoices mi
+      WHERE payment_status IN ('pending', 'partial', 'overdue') ${wsFilterInvoices.sql}
+    `, [...wsFilterInvoices.params]);
+
+    const cuentasPorCobrar = Number(receivables[0].total);
+    const totalActivos = efectivo + cuentasPorCobrar;
+
+    // ========== PASIVOS ==========
+
+    // 1. Saldos a favor de clientes (obligación de prestar servicio o devolver)
+    const [clientBal]: any = await req.db.query(`
+      SELECT COALESCE(SUM(cp.account_balance), 0) as total
+      FROM clients_profiles cp
+      JOIN users u ON u.id = cp.user_id
+      WHERE u.role = 'client' AND cp.account_balance > 0 ${wsFilterBalances.sql}
+    `, [...wsFilterBalances.params]);
+
+    const saldosClientes = Number(clientBal[0].total);
+    const totalPasivos = saldosClientes;
+
+    // ========== PATRIMONIO ==========
+    const patrimonio = totalActivos - totalPasivos;
+
+    res.json({
+      activos: {
+        efectivo: parseFloat(efectivo.toFixed(2)),
+        cuentasPorCobrar: parseFloat(cuentasPorCobrar.toFixed(2)),
+        total: parseFloat(totalActivos.toFixed(2))
+      },
+      pasivos: {
+        saldosClientesPrepagados: parseFloat(saldosClientes.toFixed(2)),
+        total: parseFloat(totalPasivos.toFixed(2))
+      },
+      patrimonio: parseFloat(patrimonio.toFixed(2)),
+      ecuacion: `Activos (${totalActivos.toFixed(2)}) - Pasivos (${totalPasivos.toFixed(2)}) = Patrimonio (${patrimonio.toFixed(2)})`
+    });
+  } catch (error) {
+    console.error('Error obteniendo balance general:', error);
+    res.status(500).json({ error: 'Error al obtener balance general' });
+  }
+};
+
+/**
+ * GET /api/admin/dashboard/metricas-financieras
+ * Métricas de Salud Financiera
+ */
+export const getMetricasFinancieras: RequestHandler = async (req: any, res: any) => {
+  const { months = 3 } = req.query; // Últimos N meses para promedios
+  const isConsolidated = req.isConsolidatedView;
+  const workspaceId = req.workspaceId;
+  let accessibleIds: number[] = [];
+
+  if (isConsolidated) {
+    const workspaceService = new WorkspaceService(req.db);
+    accessibleIds = await workspaceService.getAccessibleWorkspaceIds(req.user.id);
+  }
+
+  const wsFilterInvoices = getWorkspaceFilterSQL(isConsolidated, workspaceId, accessibleIds, 'mi');
+  const wsFilterPayments = getWorkspaceFilterSQL(isConsolidated, workspaceId, accessibleIds, 'cp');
+  const wsFilterExpenses = getWorkspaceFilterSQL(isConsolidated, workspaceId, accessibleIds, '', true);
+
+  try {
+    // ========== RATIO DE COBRANZA ==========
+    // (Total cobrado / Total facturado) * 100
+    const [invoiceTotals]: any = await req.db.query(`
+      SELECT
+        COALESCE(SUM(total_due), 0) as facturado,
+        COALESCE(SUM(amount_paid), 0) as cobrado
+      FROM monthly_invoices mi
+      WHERE 1=1 ${wsFilterInvoices.sql}
+    `, [...wsFilterInvoices.params]);
+
+    const facturado = Number(invoiceTotals[0].facturado);
+    const cobrado = Number(invoiceTotals[0].cobrado);
+    const ratioCobranza = facturado > 0 ? (cobrado / facturado) * 100 : 0;
+
+    // ========== DÍAS PROMEDIO DE COBRO ==========
+    // Promedio de días entre creación de factura y pago completo
+    const [avgDays]: any = await req.db.query(`
+      SELECT AVG(DATEDIFF(payment_registered_at, created_at)) as promedio
+      FROM monthly_invoices mi
+      WHERE payment_status = 'paid'
+      AND payment_registered_at IS NOT NULL
+      ${wsFilterInvoices.sql}
+    `, [...wsFilterInvoices.params]);
+
+    const diasPromedioCobro = Math.round(Number(avgDays[0].promedio || 0));
+
+    // ========== CLIENTES MOROSOS VS AL DÍA ==========
+    const [clientStatus]: any = await req.db.query(`
+      SELECT
+        COUNT(DISTINCT CASE WHEN mi.payment_status IN ('pending', 'partial', 'overdue') THEN mi.client_user_id END) as morosos,
+        COUNT(DISTINCT CASE WHEN mi.payment_status = 'paid' THEN mi.client_user_id END) as al_dia
+      FROM monthly_invoices mi
+      WHERE mi.invoice_year = YEAR(CURDATE()) AND mi.invoice_month = MONTH(CURDATE())
+      ${wsFilterInvoices.sql}
+    `, [...wsFilterInvoices.params]);
+
+    // ========== MARGEN DE GANANCIA ==========
+    // (Ingresos - Gastos) / Ingresos * 100
+    const [income]: any = await req.db.query(`
+      SELECT COALESCE(SUM(amount_paid), 0) as total
+      FROM monthly_invoices mi
+      WHERE payment_status IN ('paid', 'partial')
+      ${wsFilterInvoices.sql}
+    `, [...wsFilterInvoices.params]);
+
+    const [expense]: any = await req.db.query(`
+      SELECT COALESCE(SUM(amount), 0) as total
+      FROM expenses WHERE is_active = TRUE ${wsFilterExpenses.sql}
+    `, [...wsFilterExpenses.params]);
+
+    const ingresos = Number(income[0].total);
+    const gastos = Number(expense[0].total);
+    const margenGanancia = ingresos > 0 ? ((ingresos - gastos) / ingresos) * 100 : 0;
+
+    // ========== TASA DE RETENCIÓN (clientes que pagan vs total) ==========
+    const [retention]: any = await req.db.query(`
+      SELECT
+        COUNT(DISTINCT mi.client_user_id) as clientes_con_facturas,
+        COUNT(DISTINCT CASE WHEN mi.payment_status = 'paid' THEN mi.client_user_id END) as clientes_que_pagan
+      FROM monthly_invoices mi
+      WHERE mi.invoice_year >= YEAR(CURDATE()) - 1
+      ${wsFilterInvoices.sql}
+    `, [...wsFilterInvoices.params]);
+
+    const clientesConFacturas = Number(retention[0].clientes_con_facturas);
+    const clientesQuePagan = Number(retention[0].clientes_que_pagan);
+    const tasaRetencion = clientesConFacturas > 0 ? (clientesQuePagan / clientesConFacturas) * 100 : 0;
+
+    // ========== AGING DE CUENTAS POR COBRAR ==========
+    const [aging]: any = await req.db.query(`
+      SELECT
+        SUM(CASE WHEN DATEDIFF(CURDATE(), due_date) <= 30 THEN balance ELSE 0 END) as dias_0_30,
+        SUM(CASE WHEN DATEDIFF(CURDATE(), due_date) BETWEEN 31 AND 60 THEN balance ELSE 0 END) as dias_31_60,
+        SUM(CASE WHEN DATEDIFF(CURDATE(), due_date) BETWEEN 61 AND 90 THEN balance ELSE 0 END) as dias_61_90,
+        SUM(CASE WHEN DATEDIFF(CURDATE(), due_date) > 90 THEN balance ELSE 0 END) as dias_90_plus
+      FROM monthly_invoices mi
+      WHERE payment_status IN ('pending', 'partial', 'overdue')
+      ${wsFilterInvoices.sql}
+    `, [...wsFilterInvoices.params]);
+
+    res.json({
+      cobranza: {
+        ratioCobranza: parseFloat(ratioCobranza.toFixed(1)),
+        diasPromedioCobro,
+        totalFacturado: parseFloat(facturado.toFixed(2)),
+        totalCobrado: parseFloat(cobrado.toFixed(2)),
+        pendiente: parseFloat((facturado - cobrado).toFixed(2))
+      },
+      clientes: {
+        morosos: Number(clientStatus[0].morosos || 0),
+        alDia: Number(clientStatus[0].al_dia || 0),
+        tasaRetencion: parseFloat(tasaRetencion.toFixed(1))
+      },
+      rentabilidad: {
+        ingresos: parseFloat(ingresos.toFixed(2)),
+        gastos: parseFloat(gastos.toFixed(2)),
+        ganancia: parseFloat((ingresos - gastos).toFixed(2)),
+        margenGanancia: parseFloat(margenGanancia.toFixed(1))
+      },
+      agingCuentasPorCobrar: {
+        dias_0_30: parseFloat(Number(aging[0].dias_0_30 || 0).toFixed(2)),
+        dias_31_60: parseFloat(Number(aging[0].dias_31_60 || 0).toFixed(2)),
+        dias_61_90: parseFloat(Number(aging[0].dias_61_90 || 0).toFixed(2)),
+        dias_90_plus: parseFloat(Number(aging[0].dias_90_plus || 0).toFixed(2))
+      }
+    });
+  } catch (error) {
+    console.error('Error obteniendo métricas financieras:', error);
+    res.status(500).json({ error: 'Error al obtener métricas financieras' });
+  }
+};
