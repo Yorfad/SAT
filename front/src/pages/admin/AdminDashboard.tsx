@@ -32,6 +32,68 @@ type Summary = {
   expensesByCategory: { category: string; total: number }[];
 };
 
+type CajaPersonal = {
+  resumen: {
+    efectivoTotal: number;
+    efectivoDisponible: number;
+    comprometido: number;
+    porCobrar: number;
+    facturasPendientes: number;
+  };
+  detalle: {
+    entradas: {
+      pagosClientes: number;
+      ingresosExternos: number;
+      total: number;
+    };
+    salidas: {
+      gastos: number;
+      total: number;
+    };
+  };
+};
+
+type BalanceGeneral = {
+  activos: {
+    efectivo: number;
+    cuentasPorCobrar: number;
+    total: number;
+  };
+  pasivos: {
+    saldosClientesPrepagados: number;
+    total: number;
+  };
+  patrimonio: number;
+  ecuacion: string;
+};
+
+type MetricasFinancieras = {
+  cobranza: {
+    ratioCobranza: number;
+    diasPromedioCobro: number;
+    totalFacturado: number;
+    totalCobrado: number;
+    pendiente: number;
+  };
+  clientes: {
+    morosos: number;
+    alDia: number;
+    tasaRetencion: number;
+  };
+  rentabilidad: {
+    ingresos: number;
+    gastos: number;
+    ganancia: number;
+    margenGanancia: number;
+  };
+  agingCuentasPorCobrar: {
+    dias_0_30: number;
+    dias_31_60: number;
+    dias_61_90: number;
+    dias_90_plus: number;
+  };
+};
+
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
 export default function AdminDashboard(){
@@ -99,6 +161,9 @@ export default function AdminDashboard(){
       queryClient.invalidateQueries({ queryKey: ["task-stats"] });
       queryClient.invalidateQueries({ queryKey: ["admin-summary"] });
       queryClient.invalidateQueries({ queryKey: ["admin-projections"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-caja-personal"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-balance-general"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-metricas-financieras"] });
     }, 50);
   };
 
@@ -126,6 +191,39 @@ export default function AdminDashboard(){
       params.append("year", String(selectedYear));
       params.append("month", String(selectedMonth));
       return (await api.get(`/admin/dashboard/projections?${params}`)).data;
+    }
+  });
+
+  // Caja Personal
+  const { data: cajaPersonal } = useQuery({
+    queryKey:["admin-caja-personal", selectedYear, selectedMonth, showAllWorkspaces],
+    queryFn: async ()=> {
+      const params = new URLSearchParams();
+      params.append("year", String(selectedYear));
+      params.append("month", String(selectedMonth));
+      return (await api.get<CajaPersonal>(`/admin/dashboard/caja-personal?${params}`)).data;
+    }
+  });
+
+  // Balance General
+  const { data: balanceGeneral } = useQuery({
+    queryKey:["admin-balance-general", selectedYear, selectedMonth, showAllWorkspaces],
+    queryFn: async ()=> {
+      const params = new URLSearchParams();
+      params.append("year", String(selectedYear));
+      params.append("month", String(selectedMonth));
+      return (await api.get<BalanceGeneral>(`/admin/dashboard/balance-general?${params}`)).data;
+    }
+  });
+
+  // Métricas Financieras
+  const { data: metricas } = useQuery({
+    queryKey:["admin-metricas-financieras", selectedYear, selectedMonth, showAllWorkspaces],
+    queryFn: async ()=> {
+      const params = new URLSearchParams();
+      params.append("year", String(selectedYear));
+      params.append("month", String(selectedMonth));
+      return (await api.get<MetricasFinancieras>(`/admin/dashboard/metricas-financieras?${params}`)).data;
     }
   });
 
@@ -359,6 +457,227 @@ export default function AdminDashboard(){
           )}
         </div>
       )}
+
+      {/* Caja Personal, Balance General y Métricas Financieras */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Caja Personal */}
+        {cajaPersonal && (
+          <div className="bg-gradient-to-br from-emerald-900/20 to-teal-900/20 border border-emerald-700 rounded-xl shadow-lg p-5">
+            <h3 className="text-lg font-semibold text-emerald-400 mb-4 flex items-center gap-2">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+              Caja Personal
+            </h3>
+
+            <div className="space-y-3">
+              <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700">
+                <p className="text-xs text-slate-400">Efectivo Total</p>
+                <p className="text-xl font-bold text-emerald-400">{money(cajaPersonal.resumen?.efectivoTotal ?? 0)}</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-slate-900/30 rounded p-2">
+                  <p className="text-xs text-slate-400">Disponible</p>
+                  <p className="text-sm font-semibold text-green-400">{money(cajaPersonal.resumen?.efectivoDisponible ?? 0)}</p>
+                </div>
+                <div className="bg-slate-900/30 rounded p-2">
+                  <p className="text-xs text-slate-400">Comprometido</p>
+                  <p className="text-sm font-semibold text-yellow-400">{money(cajaPersonal.resumen?.comprometido ?? 0)}</p>
+                </div>
+              </div>
+
+              <div className="bg-slate-900/30 rounded p-2">
+                <p className="text-xs text-slate-400">Por Cobrar</p>
+                <p className="text-sm font-semibold text-blue-400">{money(cajaPersonal.resumen?.porCobrar ?? 0)}</p>
+              </div>
+
+              <details className="mt-2">
+                <summary className="cursor-pointer text-xs text-emerald-300 hover:text-emerald-200">
+                  Ver detalle ({cajaPersonal.resumen?.facturasPendientes ?? 0} facturas pendientes)
+                </summary>
+                <div className="mt-2 space-y-1 text-xs">
+                  <p className="text-slate-500 font-medium mb-1">Entradas:</p>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Pagos Clientes</span>
+                    <span className="text-green-400">+{money(cajaPersonal.detalle?.entradas?.pagosClientes ?? 0)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Ingresos Externos</span>
+                    <span className="text-green-400">+{money(cajaPersonal.detalle?.entradas?.ingresosExternos ?? 0)}</span>
+                  </div>
+                  <div className="flex justify-between border-t border-slate-700 pt-1 mt-1">
+                    <span className="text-slate-300 font-medium">Total Entradas</span>
+                    <span className="text-slate-300">{money(cajaPersonal.detalle?.entradas?.total ?? 0)}</span>
+                  </div>
+                  <p className="text-slate-500 font-medium mb-1 mt-2">Salidas:</p>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Gastos</span>
+                    <span className="text-red-400">-{money(cajaPersonal.detalle?.salidas?.gastos ?? 0)}</span>
+                  </div>
+                </div>
+              </details>
+            </div>
+          </div>
+        )}
+
+        {/* Balance General */}
+        {balanceGeneral && (
+          <div className="bg-gradient-to-br from-blue-900/20 to-indigo-900/20 border border-blue-700 rounded-xl shadow-lg p-5">
+            <h3 className="text-lg font-semibold text-blue-400 mb-4 flex items-center gap-2">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+              </svg>
+              Balance General
+            </h3>
+
+            <div className="space-y-3">
+              {/* Activos */}
+              <div className="bg-green-900/20 rounded-lg p-3 border border-green-800">
+                <p className="text-xs text-green-300 mb-2 font-medium">ACTIVOS</p>
+                <div className="space-y-1 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Efectivo</span>
+                    <span className="text-slate-300">{money(balanceGeneral.activos?.efectivo ?? 0)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Cuentas por Cobrar</span>
+                    <span className="text-slate-300">{money(balanceGeneral.activos?.cuentasPorCobrar ?? 0)}</span>
+                  </div>
+                  <div className="flex justify-between pt-1 border-t border-green-800">
+                    <span className="text-white font-medium">Total Activos</span>
+                    <span className="text-green-400 font-bold">{money(balanceGeneral.activos?.total ?? 0)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Pasivos */}
+              <div className="bg-red-900/20 rounded-lg p-3 border border-red-800">
+                <p className="text-xs text-red-300 mb-2 font-medium">PASIVOS</p>
+                <div className="flex justify-between text-sm">
+                  <span className="text-white font-medium">Total Pasivos</span>
+                  <span className="text-red-400 font-bold">{money(balanceGeneral.pasivos?.total ?? 0)}</span>
+                </div>
+              </div>
+
+              {/* Patrimonio */}
+              <div className={`rounded-lg p-3 border ${
+                (balanceGeneral.patrimonio ?? 0) >= 0
+                  ? 'bg-blue-900/20 border-blue-600'
+                  : 'bg-red-900/20 border-red-600'
+              }`}>
+                <div className="flex justify-between items-center">
+                  <span className="text-white font-semibold">PATRIMONIO</span>
+                  <span className={`text-xl font-bold ${
+                    (balanceGeneral.patrimonio ?? 0) >= 0 ? 'text-blue-400' : 'text-red-400'
+                  }`}>
+                    {money(balanceGeneral.patrimonio ?? 0)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Métricas Financieras */}
+        {metricas && (
+          <div className="bg-gradient-to-br from-amber-900/20 to-orange-900/20 border border-amber-700 rounded-xl shadow-lg p-5">
+            <h3 className="text-lg font-semibold text-amber-400 mb-4 flex items-center gap-2">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+              </svg>
+              Métricas Financieras
+            </h3>
+
+            <div className="space-y-3">
+              {/* Cobranza */}
+              <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700">
+                <p className="text-xs text-slate-400 mb-2">Cobranza</p>
+                <div className="flex items-center gap-4">
+                  <div className="flex-1">
+                    <p className="text-2xl font-bold text-amber-400">
+                      {(metricas.cobranza?.ratioCobranza ?? 0).toFixed(0)}%
+                    </p>
+                    <p className="text-xs text-slate-500">Ratio de Cobranza</p>
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-xl font-semibold text-slate-300">
+                      {(metricas.cobranza?.diasPromedioCobro ?? 0).toFixed(0)}
+                    </p>
+                    <p className="text-xs text-slate-500">Días Promedio</p>
+                  </div>
+                </div>
+                {/* Barra de progreso del ratio */}
+                <div className="mt-2">
+                  <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full transition-all ${
+                        (metricas.cobranza?.ratioCobranza ?? 0) >= 80 ? 'bg-green-500' :
+                        (metricas.cobranza?.ratioCobranza ?? 0) >= 60 ? 'bg-amber-500' : 'bg-red-500'
+                      }`}
+                      style={{ width: `${Math.min(metricas.cobranza?.ratioCobranza ?? 0, 100)}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Rentabilidad */}
+              <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700">
+                <p className="text-xs text-slate-400 mb-1">Margen de Ganancia</p>
+                <p className={`text-xl font-bold ${
+                  (metricas.rentabilidad?.margenGanancia ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'
+                }`}>
+                  {(metricas.rentabilidad?.margenGanancia ?? 0).toFixed(1)}%
+                </p>
+              </div>
+
+              {/* Clientes */}
+              <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700">
+                <p className="text-xs text-slate-400 mb-2">Estado de Clientes</p>
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 text-center">
+                    <p className="text-lg font-bold text-green-400">{metricas.clientes?.alDia ?? 0}</p>
+                    <p className="text-xs text-slate-500">Al día</p>
+                  </div>
+                  <div className="flex-1 text-center">
+                    <p className="text-lg font-bold text-red-400">{metricas.clientes?.morosos ?? 0}</p>
+                    <p className="text-xs text-slate-500">Morosos</p>
+                  </div>
+                  <div className="flex-1 text-center">
+                    <p className="text-lg font-bold text-blue-400">{(metricas.clientes?.tasaRetencion ?? 0).toFixed(0)}%</p>
+                    <p className="text-xs text-slate-500">Retención</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Aging */}
+              <details>
+                <summary className="cursor-pointer text-xs text-amber-300 hover:text-amber-200">
+                  Aging Cuentas por Cobrar
+                </summary>
+                <div className="mt-2 space-y-1">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-green-400">0-30 días</span>
+                    <span className="text-slate-300">{money(metricas.agingCuentasPorCobrar?.dias_0_30 ?? 0)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-yellow-400">31-60 días</span>
+                    <span className="text-slate-300">{money(metricas.agingCuentasPorCobrar?.dias_31_60 ?? 0)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-orange-400">61-90 días</span>
+                    <span className="text-slate-300">{money(metricas.agingCuentasPorCobrar?.dias_61_90 ?? 0)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-red-400">90+ días</span>
+                    <span className="text-slate-300">{money(metricas.agingCuentasPorCobrar?.dias_90_plus ?? 0)}</span>
+                  </div>
+                </div>
+              </details>
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="border-t border-slate-700 pt-4">
         <h2 className="text-lg font-semibold text-white mb-4">Datos Históricos (Reales)</h2>
