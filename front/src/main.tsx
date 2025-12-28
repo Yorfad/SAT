@@ -29,7 +29,6 @@ import InvitationsPage from './pages/admin/InvitationsPage';
 import ClientFieldsPage from './pages/admin/ClientFieldsPage';
 import UsersPage from './pages/admin/UsersPage';
 import RolesPage from './pages/admin/RolesPage';
-import HistorialPage from './pages/admin/HistorialPage';
 
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { WorkspaceProvider } from './context/WorkspaceContext';
@@ -106,14 +105,6 @@ const router = createBrowserRouter([
         element: (
           <Protected roles={['admin','employee']}>
             <TaskDetailPage />
-          </Protected>
-        ),
-      },
-      {
-        path: 'admin/historial',
-        element: (
-          <Protected roles={['admin','employee']}>
-            <HistorialPage />
           </Protected>
         ),
       },

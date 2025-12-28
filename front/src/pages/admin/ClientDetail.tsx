@@ -1,93 +1,128 @@
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import api from "../../lib/api";
-import type { Invoice } from '../../types';
-import { money, ym } from "../../utils/format";
-import UploadArtifact from "../../ui/UploadArtifact";
+import { money } from "../../utils/format";
 
-export default function ClientDetail(){
+type ViewMode = 'services' | 'months' | 'detail';
+
+interface Service {
+  id: number;
+  service_id: number;
+  service_name: string;
+  description: string;
+  price: number;
+  status: string;
+}
+
+interface Task {
+  id: number;
+  task_name: string;
+  status: string;
+  file_path: string | null;
+  client_approved: boolean | null;
+  client_approved_at: string | null;
+  client_rejection_reason: string | null;
+  completion_date: string | null;
+  files_uploaded_at: string | null;
+  service_id: number;
+  invoice_month: number;
+  invoice_year: number;
+  invoice_id: number;
+  service_name: string;
+  service_description: string;
+}
+
+interface MonthData {
+  month: number;
+  year: number;
+  label: string;
+  tasks: Task[];
+  hasCompletedTasks: boolean;
+  hasFiles: boolean;
+}
+
+const MONTH_NAMES = [
+  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+];
+
+export default function ClientDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
+
+  // View state
+  const [viewMode, setViewMode] = useState<ViewMode>('services');
+  const [selectedService, setSelectedService] = useState<Service | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState<MonthData | null>(null);
+
+  // Modals
   const [showDeactivateModal, setShowDeactivateModal] = useState(false);
   const [deactivationReason, setDeactivationReason] = useState("");
   const [error, setError] = useState("");
 
-  // Bundle modals
-  const [showCreateBundleModal, setShowCreateBundleModal] = useState(false);
-  const [showEditBundleModal, setShowEditBundleModal] = useState(false);
-  const [showManageServicesModal, setShowManageServicesModal] = useState(false);
-  const [selectedBundle, setSelectedBundle] = useState<any>(null);
-  const [expandedBundles, setExpandedBundles] = useState<Set<number>>(new Set());
-
-  // Infraction modal
-  const [showCreateInfractionModal, setShowCreateInfractionModal] = useState(false);
-  const [infractionForm, setInfractionForm] = useState({
-    reason: "",
-    relatedInvoiceId: ""
-  });
-
-  // Bundle form state
-  const [bundleForm, setBundleForm] = useState({
-    name: "",
-    description: "",
-    totalPrice: "",
-    operationalCost: "",
-    selectedServiceIds: [] as number[]
-  });
-
-  const { data } = useQuery({
-    queryKey:["client-detail", id],
-    queryFn: async ()=> (await api.get(`/clients/${id}`)).data
-  });
-
-  // Obtener observaciones del cliente
-  const { data: observations = [] } = useQuery({
-    queryKey: ["client-observations", id],
-    queryFn: async () => (await api.get(`/observations/clients/${id}/observations`)).data,
+  // Obtener datos del cliente con historial
+  const { data: historyData, isLoading } = useQuery({
+    queryKey: ["client-history", id],
+    queryFn: async () => (await api.get(`/clients/${id}/history`)).data,
     enabled: !!id
   });
 
-  // Obtener observación primordial
-  const { data: primaryObservation } = useQuery({
-    queryKey: ["primary-observation", id],
-    queryFn: async () => (await api.get(`/observations/clients/${id}/primary-observation`)).data,
+  // Obtener datos completos del cliente (para deactivation info, etc)
+  const { data: clientData } = useQuery({
+    queryKey: ["client-detail", id],
+    queryFn: async () => (await api.get(`/clients/${id}`)).data,
     enabled: !!id
   });
 
-  // Obtener bundles del cliente
-  const { data: bundles = [] } = useQuery({
-    queryKey: ["client-bundles", id],
-    queryFn: async () => (await api.get(`/bundles/clients/${id}/bundles`)).data,
-    enabled: !!id
-  });
+  const client = historyData?.client || clientData?.client;
+  const services: Service[] = historyData?.services || [];
+  const allTasks: Task[] = historyData?.tasks || [];
+  const isActive = client?.is_active !== 0;
 
-  // Obtener servicios del cliente para asignar a bundles
-  const { data: clientServices = [] } = useQuery({
-    queryKey: ["client-services", id],
-    queryFn: async () => (await api.get(`/client-services/${id}/services`)).data,
-    enabled: !!id
-  });
+  // Generar los 12 meses hacia atrás
+  const last12Months = useMemo(() => {
+    const months: { month: number; year: number; label: string }[] = [];
+    const now = new Date();
+    for (let i = 0; i < 12; i++) {
+      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push({
+        month: date.getMonth() + 1,
+        year: date.getFullYear(),
+        label: `${MONTH_NAMES[date.getMonth()]} ${date.getFullYear()}`
+      });
+    }
+    return months;
+  }, []);
 
-  // Obtener servicios de un bundle específico
-  const { data: bundleServices = [] } = useQuery({
-    queryKey: ["bundle-services", selectedBundle?.id],
-    queryFn: async () => (await api.get(`/bundles/${selectedBundle?.id}/services`)).data,
-    enabled: !!selectedBundle?.id
-  });
+  // Filtrar tareas por servicio seleccionado y organizar por mes
+  const monthsWithTasks = useMemo(() => {
+    if (!selectedService) return [];
 
-  // Obtener infracciones del cliente
-  const { data: infractions = [] } = useQuery({
-    queryKey: ["client-infractions", id],
-    queryFn: async () => (await api.get(`/infractions?clientId=${id}`)).data,
-    enabled: !!id
-  });
+    return last12Months.map(m => {
+      const monthTasks = allTasks.filter(
+        t => t.service_id === selectedService.service_id &&
+          t.invoice_month === m.month &&
+          t.invoice_year === m.year
+      );
 
+      return {
+        ...m,
+        tasks: monthTasks,
+        hasCompletedTasks: monthTasks.some(t => t.status === 'completed'),
+        hasFiles: monthTasks.some(t => t.file_path)
+      };
+    });
+  }, [selectedService, allTasks, last12Months]);
+
+  // Mutations
   const deactivateMutation = useMutation({
     mutationFn: async (reason: string) => {
       return await api.post(`/clients/${id}/deactivate`, { reason });
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["client-history", id] });
       queryClient.invalidateQueries({ queryKey: ["client-detail", id] });
       setShowDeactivateModal(false);
       setDeactivationReason("");
@@ -103,164 +138,11 @@ export default function ClientDetail(){
       return await api.post(`/clients/${id}/activate`);
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["client-history", id] });
       queryClient.invalidateQueries({ queryKey: ["client-detail", id] });
     },
     onError: (err: any) => {
       alert(err?.response?.data?.message || "Error al activar cliente");
-    }
-  });
-
-  // Eliminar observación
-  const deleteObservationMutation = useMutation({
-    mutationFn: async (observationId: number) => {
-      return await api.delete(`/observations/${observationId}`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["client-observations", id] });
-      queryClient.invalidateQueries({ queryKey: ["primary-observation", id] });
-    },
-    onError: (err: any) => {
-      alert(err?.response?.data?.message || "Error al eliminar observación");
-    }
-  });
-
-  // Marcar como primordial
-  const togglePrimaryMutation = useMutation({
-    mutationFn: async ({ observationId, isPrimary }: { observationId: number; isPrimary: boolean }) => {
-      return await api.patch(`/observations/${observationId}/primary`, { is_primary: isPrimary });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["client-observations", id] });
-      queryClient.invalidateQueries({ queryKey: ["primary-observation", id] });
-    },
-    onError: (err: any) => {
-      alert(err?.response?.data?.message || "Error al actualizar observación");
-    }
-  });
-
-  // Crear bundle
-  const createBundleMutation = useMutation({
-    mutationFn: async (data: any) => {
-      return await api.post(`/bundles/clients/${id}/bundles`, data);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["client-bundles", id] });
-      queryClient.invalidateQueries({ queryKey: ["client-services", id] });
-      setShowCreateBundleModal(false);
-      setBundleForm({ name: "", description: "", totalPrice: "", operationalCost: "", selectedServiceIds: [] });
-    },
-    onError: (err: any) => {
-      alert(err?.response?.data?.message || "Error al crear bundle");
-    }
-  });
-
-  // Actualizar bundle
-  const updateBundleMutation = useMutation({
-    mutationFn: async ({ bundleId, data }: { bundleId: number; data: any }) => {
-      return await api.patch(`/bundles/${bundleId}`, data);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["client-bundles", id] });
-      setShowEditBundleModal(false);
-      setSelectedBundle(null);
-      setBundleForm({ name: "", description: "", totalPrice: "", operationalCost: "", selectedServiceIds: [] });
-    },
-    onError: (err: any) => {
-      alert(err?.response?.data?.message || "Error al actualizar bundle");
-    }
-  });
-
-  // Eliminar bundle
-  const deleteBundleMutation = useMutation({
-    mutationFn: async (bundleId: number) => {
-      return await api.delete(`/bundles/${bundleId}`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["client-bundles", id] });
-      queryClient.invalidateQueries({ queryKey: ["client-services", id] });
-    },
-    onError: (err: any) => {
-      alert(err?.response?.data?.message || "Error al eliminar bundle");
-    }
-  });
-
-  // Agregar servicio a bundle
-  const addServiceToBundleMutation = useMutation({
-    mutationFn: async ({ bundleId, serviceId }: { bundleId: number; serviceId: number }) => {
-      return await api.post(`/bundles/${bundleId}/add-service`, { serviceId });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["client-bundles", id] });
-      queryClient.invalidateQueries({ queryKey: ["client-services", id] });
-      queryClient.invalidateQueries({ queryKey: ["bundle-services", selectedBundle?.id] });
-    },
-    onError: (err: any) => {
-      alert(err?.response?.data?.message || "Error al agregar servicio");
-    }
-  });
-
-  // Remover servicio de bundle
-  const removeServiceFromBundleMutation = useMutation({
-    mutationFn: async ({ bundleId, serviceId }: { bundleId: number; serviceId: number }) => {
-      return await api.post(`/bundles/${bundleId}/remove-service`, { serviceId });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["client-bundles", id] });
-      queryClient.invalidateQueries({ queryKey: ["client-services", id] });
-      queryClient.invalidateQueries({ queryKey: ["bundle-services", selectedBundle?.id] });
-    },
-    onError: (err: any) => {
-      alert(err?.response?.data?.message || "Error al remover servicio");
-    }
-  });
-
-  // Crear infracción
-  const createInfractionMutation = useMutation({
-    mutationFn: async (data: any) => {
-      return await api.post(`/infractions`, data);
-    },
-    onSuccess: (response) => {
-      queryClient.invalidateQueries({ queryKey: ["client-infractions", id] });
-      queryClient.invalidateQueries({ queryKey: ["client-detail", id] });
-      setShowCreateInfractionModal(false);
-      setInfractionForm({ reason: "", relatedInvoiceId: "" });
-
-      if (response.data.clientDeactivated) {
-        alert("⚠️ " + response.data.message);
-      } else {
-        alert(response.data.message);
-      }
-    },
-    onError: (err: any) => {
-      if (err?.response?.data?.error === 'warning_third_infraction') {
-        const confirmed = confirm(err.response.data.message + "\n\n¿Deseas continuar y crear esta infracción?");
-        if (confirmed) {
-          // Reintentar con confirmación
-          createInfractionMutation.mutate({
-            clientUserId: parseInt(id!),
-            reason: infractionForm.reason,
-            relatedInvoiceId: infractionForm.relatedInvoiceId ? parseInt(infractionForm.relatedInvoiceId) : undefined,
-            confirmDeactivation: true
-          });
-        }
-      } else {
-        alert(err?.response?.data?.message || "Error al crear infracción");
-      }
-    }
-  });
-
-  // Resolver infracción (ahora desactivar)
-  const resolveInfractionMutation = useMutation({
-    mutationFn: async ({ infractionId, notes }: { infractionId: number; notes?: string }) => {
-      return await api.patch(`/infractions/${infractionId}/resolve`, { resolutionNotes: notes });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["client-infractions", id] });
-      queryClient.invalidateQueries({ queryKey: ["client-detail", id] });
-      alert("Infracción desactivada correctamente");
-    },
-    onError: (err: any) => {
-      alert(err?.response?.data?.message || "Error al desactivar infracción");
     }
   });
 
@@ -272,102 +154,89 @@ export default function ClientDetail(){
     deactivateMutation.mutate(deactivationReason);
   };
 
-  const handleCreateBundle = () => {
-    if (!bundleForm.name || !bundleForm.totalPrice) {
-      alert("Por favor completa el nombre y precio del bundle");
-      return;
-    }
-
-    createBundleMutation.mutate({
-      name: bundleForm.name,
-      description: bundleForm.description || undefined,
-      totalPrice: parseFloat(bundleForm.totalPrice),
-      operationalCost: bundleForm.operationalCost ? parseFloat(bundleForm.operationalCost) : 0,
-      serviceIds: bundleForm.selectedServiceIds.length > 0 ? bundleForm.selectedServiceIds : undefined
-    });
+  const handleServiceClick = (service: Service) => {
+    setSelectedService(service);
+    setViewMode('months');
   };
 
-  const handleEditBundle = () => {
-    if (!bundleForm.name || !bundleForm.totalPrice) {
-      alert("Por favor completa el nombre y precio del bundle");
-      return;
-    }
-
-    updateBundleMutation.mutate({
-      bundleId: selectedBundle.id,
-      data: {
-        name: bundleForm.name,
-        description: bundleForm.description || undefined,
-        totalPrice: parseFloat(bundleForm.totalPrice),
-        operationalCost: bundleForm.operationalCost ? parseFloat(bundleForm.operationalCost) : 0
-      }
-    });
+  const handleMonthClick = (monthData: MonthData) => {
+    setSelectedMonth(monthData);
+    setViewMode('detail');
   };
 
-  const openEditBundleModal = (bundle: any) => {
-    setSelectedBundle(bundle);
-    setBundleForm({
-      name: bundle.name,
-      description: bundle.description || "",
-      totalPrice: bundle.total_price.toString(),
-      operationalCost: bundle.operational_cost?.toString() || "0",
-      selectedServiceIds: []
-    });
-    setShowEditBundleModal(true);
-  };
-
-  const openManageServicesModal = (bundle: any) => {
-    setSelectedBundle(bundle);
-    setShowManageServicesModal(true);
-  };
-
-  const toggleBundleExpansion = (bundleId: number) => {
-    const newExpanded = new Set(expandedBundles);
-    if (newExpanded.has(bundleId)) {
-      newExpanded.delete(bundleId);
+  const handleBack = () => {
+    if (viewMode === 'detail') {
+      setViewMode('months');
+      setSelectedMonth(null);
+    } else if (viewMode === 'months') {
+      setViewMode('services');
+      setSelectedService(null);
     } else {
-      newExpanded.add(bundleId);
+      navigate('/admin/clients');
     }
-    setExpandedBundles(newExpanded);
   };
 
-  const handleCreateInfraction = () => {
-    if (!infractionForm.reason.trim()) {
-      alert("Por favor ingresa el motivo de la infracción");
-      return;
+  const handleDownload = async (filePath: string, taskName: string) => {
+    try {
+      const response = await api.get(`/files/${filePath}`, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', filePath.split('/').pop() || `${taskName}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Error descargando archivo:', err);
+      alert('Error al descargar el archivo');
     }
-
-    createInfractionMutation.mutate({
-      clientUserId: parseInt(id!),
-      reason: infractionForm.reason,
-      relatedInvoiceId: infractionForm.relatedInvoiceId ? parseInt(infractionForm.relatedInvoiceId) : undefined
-    });
   };
 
-  const invoices: Invoice[] = data?.invoices ?? [];
-  const client = data?.client;
-  const isActive = client?.is_active !== 0;
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-800 flex items-center justify-center">
+        <div className="text-slate-300 flex items-center gap-3">
+          <svg className="animate-spin h-6 w-6 text-orange-500" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          Cargando...
+        </div>
+      </div>
+    );
+  }
 
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-white">{client?.full_name}</h1>
+  // Vista de servicios (principal)
+  if (viewMode === 'services') {
+    return (
+      <div className="p-6 space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => navigate('/admin/clients')}
+              className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-700 transition-colors"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+            <div>
+              <h1 className="text-2xl font-semibold text-white">{client?.full_name}</h1>
+              <p className="text-sm text-slate-400">Servicios contratados</p>
+            </div>
+          </div>
 
-        {client && (
           <div className="flex items-center gap-3">
             {!isActive && (
               <div className="flex flex-col items-end">
                 <span className="inline-block px-3 py-1 bg-red-900/50 text-red-300 text-sm font-medium rounded-full border border-red-700">
                   Cliente Desactivado
                 </span>
-                {client.deactivation_reason && (
+                {clientData?.client?.deactivation_reason && (
                   <span className="text-xs text-slate-400 mt-1">
-                    Motivo: {client.deactivation_reason}
-                  </span>
-                )}
-                {client.deactivated_at && (
-                  <span className="text-xs text-slate-400">
-                    Fecha: {new Date(client.deactivated_at).toLocaleDateString()}
+                    Motivo: {clientData.client.deactivation_reason}
                   </span>
                 )}
               </div>
@@ -378,7 +247,7 @@ export default function ClientDetail(){
                 onClick={() => setShowDeactivateModal(true)}
                 className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
               >
-                Desactivar Cliente
+                Desactivar
               </button>
             ) : (
               <button
@@ -386,732 +255,314 @@ export default function ClientDetail(){
                 disabled={activateMutation.isPending}
                 className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
               >
-                {activateMutation.isPending ? "Activando..." : "Reactivar Cliente"}
+                {activateMutation.isPending ? "Activando..." : "Reactivar"}
               </button>
             )}
           </div>
-        )}
-      </div>
+        </div>
 
-      {/* Observación Primordial */}
-      {primaryObservation && (
-        <div className="bg-yellow-900/20 border-l-4 border-yellow-500 rounded-lg p-4">
-          <div className="flex items-start justify-between">
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-1">
-                <svg className="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
-                  <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                </svg>
-                <h3 className="font-semibold text-yellow-300">Observación Importante</h3>
-              </div>
-              <p className="text-sm text-yellow-100 mt-2">{primaryObservation.observation_text}</p>
-              <p className="text-xs text-yellow-400 mt-2">
-                Por {primaryObservation.created_by_name} • {new Date(primaryObservation.created_at).toLocaleDateString()}
-              </p>
+        {/* Lista de servicios */}
+        <div className="space-y-3">
+          {services.length === 0 ? (
+            <div className="bg-slate-900 rounded-xl border border-slate-700 p-8 text-center">
+              <svg className="w-12 h-12 mx-auto text-slate-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+              </svg>
+              <p className="text-slate-400">No hay servicios activos</p>
             </div>
-          </div>
-        </div>
-      )}
+          ) : (
+            services.map(service => {
+              // Contar tareas completadas de este servicio
+              const serviceTasks = allTasks.filter(t => t.service_id === service.service_id);
+              const completedTasks = serviceTasks.filter(t => t.status === 'completed').length;
+              const pendingTasks = serviceTasks.filter(t => t.status === 'pending').length;
 
-      <div className="bg-slate-800 rounded-xl shadow p-4 border border-slate-700">
-        <h2 className="font-medium text-white">Facturas</h2>
-        <table className="w-full text-sm mt-2">
-          <thead><tr className="text-left text-slate-400">
-            <th>Mes</th><th>Total</th><th>Pagado</th><th>Saldo</th><th>Estado</th><th>Archivos</th>
-          </tr></thead>
-          <tbody>
-            {invoices.map(inv=>(
-              <tr key={inv.id} className="border-t border-slate-700 text-slate-300">
-                <td className="py-2">{ym(inv.invoice_year, inv.invoice_month)}</td>
-                <td>{money(inv.total_due)}</td>
-                <td>{money(inv.amount_paid)}</td>
-                <td>{money(inv.balance)}</td>
-                <td className="capitalize">{inv.payment_status}</td>
-                <td><UploadArtifact invoiceId={inv.id} /></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Bundles */}
-      <div className="bg-slate-800 rounded-xl shadow p-4 border border-slate-700">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-medium text-white">Paquetes de Servicios (Bundles)</h2>
-          <button
-            onClick={() => {
-              setBundleForm({ name: "", description: "", totalPrice: "", operationalCost: "", selectedServiceIds: [] });
-              setShowCreateBundleModal(true);
-            }}
-            className="px-4 py-2 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-lg hover:from-orange-700 hover:to-amber-700 transition-all"
-          >
-            + Crear Bundle
-          </button>
-        </div>
-
-        {bundles.length === 0 ? (
-          <p className="text-sm text-slate-400">No hay bundles registrados para este cliente.</p>
-        ) : (
-          <div className="space-y-2">
-            {bundles.map((bundle: any) => (
-              <div key={bundle.id} className="border border-slate-700 rounded-lg overflow-hidden">
-                <div className="bg-slate-900/50 p-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3">
-                        <button
-                          onClick={() => toggleBundleExpansion(bundle.id)}
-                          className="text-slate-400 hover:text-white transition-colors"
-                        >
-                          <svg
-                            className={`w-5 h-5 transition-transform ${expandedBundles.has(bundle.id) ? 'rotate-90' : ''}`}
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                          </svg>
-                        </button>
-                        <div>
-                          <h3 className="font-medium text-white">{bundle.name}</h3>
-                          {bundle.description && (
-                            <p className="text-sm text-slate-400 mt-1">{bundle.description}</p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <div className="text-right">
-                        <p className="text-sm text-slate-400">Precio: <span className="text-white font-medium">{money(bundle.total_price)}</span></p>
-                        <p className="text-sm text-slate-400">Gasto: <span className="text-red-400 font-medium">{money(bundle.operational_cost || 0)}</span></p>
-                        <p className="text-sm text-slate-400">Ganancia: <span className="text-green-400 font-medium">{money((bundle.total_price || 0) - (bundle.operational_cost || 0))}</span></p>
-                        <p className="text-xs text-slate-500 mt-1">{bundle.services_count} servicios</p>
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => openManageServicesModal(bundle)}
-                          className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition-colors"
-                          title="Gestionar servicios"
-                        >
-                          Servicios
-                        </button>
-                        <button
-                          onClick={() => openEditBundleModal(bundle)}
-                          className="px-3 py-1 bg-slate-700 text-white text-sm rounded hover:bg-slate-600 transition-colors"
-                          title="Editar bundle"
-                        >
-                          Editar
-                        </button>
-                        <button
-                          onClick={() => {
-                            if (confirm(`¿Eliminar el bundle "${bundle.name}"? Los servicios se desvincularan pero no se eliminaran.`)) {
-                              deleteBundleMutation.mutate(bundle.id);
-                            }
-                          }}
-                          className="px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors"
-                          title="Eliminar bundle"
-                        >
-                          Eliminar
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {expandedBundles.has(bundle.id) && (
-                  <div className="p-3 bg-slate-900/30 border-t border-slate-700">
-                    <p className="text-xs text-slate-400 mb-2">Servicios incluidos en este bundle:</p>
-                    {/* This will be populated when we query bundle services */}
-                    <div className="text-sm text-slate-300">
-                      <p className="text-slate-500">Cargando servicios...</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Observaciones */}
-      <div className="bg-slate-800 rounded-xl shadow p-4 border border-slate-700">
-        <h2 className="font-medium mb-4 text-white">Observaciones del Cliente</h2>
-
-        {observations.length === 0 ? (
-          <p className="text-sm text-slate-400">No hay observaciones registradas para este cliente.</p>
-        ) : (
-          <div className="space-y-3">
-            {observations.map((obs: any) => (
-              <div
-                key={obs.id}
-                className={`border rounded-lg p-3 ${
-                  obs.is_primary ? 'border-yellow-500 bg-yellow-900/20' : 'border-slate-700 bg-slate-900/30'
-                }`}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      {obs.is_primary && (
-                        <svg className="w-4 h-4 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
-                          <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                        </svg>
-                      )}
-                      <span className="text-xs font-medium text-slate-400">
-                        {obs.task_name} • {obs.invoice_month}/{obs.invoice_year}
-                      </span>
-                      {obs.rating !== null && (
-                        <span className="text-yellow-400 text-sm">
-                          {"★".repeat(obs.rating)}{"☆".repeat(5 - obs.rating)}
-                        </span>
-                      )}
-                    </div>
-
-                    {obs.observation_text && (
-                      <p className="text-sm text-slate-200 mt-1">{obs.observation_text}</p>
-                    )}
-
-                    <p className="text-xs text-slate-400 mt-2">
-                      Por {obs.created_by_name} • {new Date(obs.created_at).toLocaleDateString()}
-                    </p>
-                  </div>
-
-                  <div className="flex gap-2 ml-4">
-                    <button
-                      onClick={() =>
-                        togglePrimaryMutation.mutate({
-                          observationId: obs.id,
-                          isPrimary: !obs.is_primary
-                        })
-                      }
-                      title={obs.is_primary ? "Desmarcar como importante" : "Marcar como importante"}
-                      className="text-slate-400 hover:text-yellow-400 transition-colors"
-                    >
-                      <svg className="w-5 h-5" fill={obs.is_primary ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+              return (
+                <button
+                  key={service.id}
+                  onClick={() => handleServiceClick(service)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 flex items-center justify-between hover:border-orange-600 transition-colors text-left"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-orange-900/30 rounded-lg">
+                      <svg className="w-6 h-6 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                       </svg>
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (confirm("¿Seguro que quieres eliminar esta observación?")) {
-                          deleteObservationMutation.mutate(obs.id);
-                        }
-                      }}
-                      title="Eliminar observación"
-                      className="text-slate-400 hover:text-red-400 transition-colors"
-                    >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Infracciones */}
-      <div className="bg-slate-800 rounded-xl shadow p-4 border border-slate-700">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-medium text-white">Infracciones</h2>
-          <button
-            onClick={() => {
-              setInfractionForm({ reason: "", relatedInvoiceId: "" });
-              setShowCreateInfractionModal(true);
-            }}
-            className="px-4 py-2 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-lg hover:from-orange-700 hover:to-amber-700 transition-all"
-          >
-            + Agregar Infracción
-          </button>
-        </div>
-
-        {infractions.length === 0 ? (
-          <p className="text-sm text-slate-400">No hay infracciones registradas para este cliente.</p>
-        ) : (
-          <div className="space-y-2">
-            {infractions.map((infraction: any) => (
-              <div
-                key={infraction.id}
-                className={`border rounded-lg p-3 ${
-                  infraction.is_active
-                    ? 'border-red-700 bg-red-900/20'
-                    : 'border-slate-700 bg-slate-900/30 opacity-70'
-                }`}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className={`text-xs font-medium px-2 py-1 rounded ${
-                        infraction.is_active
-                          ? 'bg-red-900/50 text-red-300 border border-red-700'
-                          : 'bg-gray-700 text-gray-300 border border-gray-600'
-                      }`}>
-                        {infraction.is_active ? 'ACTIVA' : 'DESACTIVADA'}
-                      </span>
-                      <span className="text-xs text-slate-400">
-                        {infraction.infraction_type === 'automatic_unpaid' ? 'Automática (impago)' : 'Manual'}
-                      </span>
-                      {infraction.invoice_month && infraction.invoice_year && (
-                        <span className="text-xs text-slate-400">
-                          • {infraction.invoice_month}/{infraction.invoice_year}
-                        </span>
-                      )}
                     </div>
-
-                    <p className="text-sm text-slate-200 mt-2">{infraction.reason}</p>
-
-                    <p className="text-xs text-slate-400 mt-2">
-                      Creada por {infraction.created_by_name} • {new Date(infraction.created_at).toLocaleDateString()}
-                    </p>
-
-                    {!infraction.is_active && infraction.resolved_at && (
-                      <p className="text-xs text-green-400 mt-1">
-                        Resuelta por {infraction.resolved_by_name} • {new Date(infraction.resolved_at).toLocaleDateString()}
-                        {infraction.resolution_notes && ` • ${infraction.resolution_notes}`}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="flex gap-2 ml-4">
-                    {infraction.is_active && (
-                      <button
-                        onClick={() => {
-                          const notes = prompt("Notas de resolución (opcional):");
-                          if (notes !== null) {
-                            resolveInfractionMutation.mutate({
-                              infractionId: infraction.id,
-                              notes: notes || "Desactivada por administrador"
-                            });
-                          }
-                        }}
-                        className="px-2 py-1 bg-yellow-600 text-white text-xs rounded hover:bg-yellow-700 transition-colors"
-                        title="Desactivar infracción"
-                      >
-                        Desactivar
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Modal de Desactivación */}
-      {showDeactivateModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-slate-800 rounded-lg p-6 w-full max-w-md border border-slate-700">
-            <h2 className="text-xl font-semibold mb-4 text-white">Desactivar Cliente</h2>
-
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-slate-300 mb-2">
-                Motivo de desactivación (mínimo 5 caracteres)
-              </label>
-              <textarea
-                value={deactivationReason}
-                onChange={(e) => {
-                  setDeactivationReason(e.target.value);
-                  setError("");
-                }}
-                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-white"
-                rows={4}
-                placeholder="Ej: Cliente no ha pagado en tres meses"
-              />
-              {error && (
-                <p className="text-red-400 text-sm mt-1">{error}</p>
-              )}
-            </div>
-
-            <div className="bg-yellow-900/20 border border-yellow-700 rounded-lg p-3 mb-4">
-              <p className="text-sm text-yellow-300">
-                <strong>Advertencia:</strong> Al desactivar este cliente:
-              </p>
-              <ul className="text-sm text-yellow-200 mt-2 list-disc list-inside space-y-1">
-                <li>No podrá acceder al sistema</li>
-                <li>Sus tareas no aparecerán en las listas</li>
-                <li>No se generarán nuevas tareas mensuales</li>
-                <li>Esta acción es reversible</li>
-              </ul>
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                onClick={() => {
-                  setShowDeactivateModal(false);
-                  setDeactivationReason("");
-                  setError("");
-                }}
-                className="flex-1 px-4 py-2 bg-slate-700 text-slate-200 rounded-lg hover:bg-slate-600 transition-colors"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleDeactivate}
-                disabled={deactivateMutation.isPending}
-                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
-              >
-                {deactivateMutation.isPending ? "Desactivando..." : "Confirmar Desactivación"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Crear Bundle */}
-      {showCreateBundleModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-slate-800 rounded-lg p-6 w-full max-w-2xl border border-slate-700 max-h-[90vh] overflow-y-auto">
-            <h2 className="text-xl font-semibold mb-4 text-white">Crear Nuevo Bundle</h2>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Nombre del Bundle
-                </label>
-                <input
-                  type="text"
-                  value={bundleForm.name}
-                  onChange={(e) => setBundleForm({ ...bundleForm, name: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-white"
-                  placeholder="Ej: Paquete Mensual Completo"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Descripción (opcional)
-                </label>
-                <textarea
-                  value={bundleForm.description}
-                  onChange={(e) => setBundleForm({ ...bundleForm, description: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-white"
-                  rows={3}
-                  placeholder="Descripción del bundle..."
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Precio Total (Q)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={bundleForm.totalPrice}
-                  onChange={(e) => setBundleForm({ ...bundleForm, totalPrice: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-white"
-                  placeholder="0.00"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Gasto Operativo (Q)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={bundleForm.operationalCost}
-                  onChange={(e) => setBundleForm({ ...bundleForm, operationalCost: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-white"
-                  placeholder="0.00"
-                />
-                <p className="text-xs text-slate-400 mt-1">
-                  Ganancia: Q{(parseFloat(bundleForm.totalPrice || "0") - parseFloat(bundleForm.operationalCost || "0")).toFixed(2)}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Servicios a incluir (opcional)
-                </label>
-                <div className="space-y-2 max-h-60 overflow-y-auto bg-slate-900 rounded-lg p-3 border border-slate-700">
-                  {clientServices.filter((s: any) => !s.bundle_id).map((service: any) => (
-                    <label key={service.id} className="flex items-center gap-2 text-slate-300 hover:bg-slate-800 p-2 rounded cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={bundleForm.selectedServiceIds.includes(service.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setBundleForm({
-                              ...bundleForm,
-                              selectedServiceIds: [...bundleForm.selectedServiceIds, service.id]
-                            });
-                          } else {
-                            setBundleForm({
-                              ...bundleForm,
-                              selectedServiceIds: bundleForm.selectedServiceIds.filter(id => id !== service.id)
-                            });
-                          }
-                        }}
-                        className="rounded"
-                      />
-                      <span className="flex-1">{service.service_name}</span>
-                      <span className="text-slate-400">{money(service.price)}</span>
-                    </label>
-                  ))}
-                  {clientServices.filter((s: any) => !s.bundle_id).length === 0 && (
-                    <p className="text-slate-500 text-sm">No hay servicios disponibles sin bundle</p>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => {
-                  setShowCreateBundleModal(false);
-                  setBundleForm({ name: "", description: "", totalPrice: "", operationalCost: "", selectedServiceIds: [] });
-                }}
-                className="flex-1 px-4 py-2 bg-slate-700 text-slate-200 rounded-lg hover:bg-slate-600 transition-colors"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleCreateBundle}
-                disabled={createBundleMutation.isPending}
-                className="flex-1 px-4 py-2 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-lg hover:from-orange-700 hover:to-amber-700 transition-all disabled:opacity-50"
-              >
-                {createBundleMutation.isPending ? "Creando..." : "Crear Bundle"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Editar Bundle */}
-      {showEditBundleModal && selectedBundle && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-slate-800 rounded-lg p-6 w-full max-w-md border border-slate-700">
-            <h2 className="text-xl font-semibold mb-4 text-white">Editar Bundle</h2>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Nombre del Bundle
-                </label>
-                <input
-                  type="text"
-                  value={bundleForm.name}
-                  onChange={(e) => setBundleForm({ ...bundleForm, name: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Descripción
-                </label>
-                <textarea
-                  value={bundleForm.description}
-                  onChange={(e) => setBundleForm({ ...bundleForm, description: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-white"
-                  rows={3}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Precio Total (Q)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={bundleForm.totalPrice}
-                  onChange={(e) => setBundleForm({ ...bundleForm, totalPrice: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Gasto Operativo (Q)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={bundleForm.operationalCost}
-                  onChange={(e) => setBundleForm({ ...bundleForm, operationalCost: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-white"
-                />
-                <p className="text-xs text-slate-400 mt-1">
-                  Ganancia: Q{(parseFloat(bundleForm.totalPrice || "0") - parseFloat(bundleForm.operationalCost || "0")).toFixed(2)}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => {
-                  setShowEditBundleModal(false);
-                  setSelectedBundle(null);
-                  setBundleForm({ name: "", description: "", totalPrice: "", operationalCost: "", selectedServiceIds: [] });
-                }}
-                className="flex-1 px-4 py-2 bg-slate-700 text-slate-200 rounded-lg hover:bg-slate-600 transition-colors"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleEditBundle}
-                disabled={updateBundleMutation.isPending}
-                className="flex-1 px-4 py-2 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-lg hover:from-orange-700 hover:to-amber-700 transition-all disabled:opacity-50"
-              >
-                {updateBundleMutation.isPending ? "Guardando..." : "Guardar Cambios"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Gestionar Servicios */}
-      {showManageServicesModal && selectedBundle && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-slate-800 rounded-lg p-6 w-full max-w-3xl border border-slate-700 max-h-[90vh] overflow-y-auto">
-            <h2 className="text-xl font-semibold mb-4 text-white">
-              Gestionar Servicios - {selectedBundle.name}
-            </h2>
-
-            <div className="grid grid-cols-2 gap-4">
-              {/* Servicios en el bundle */}
-              <div>
-                <h3 className="text-sm font-medium text-slate-300 mb-2">Servicios en este bundle</h3>
-                <div className="space-y-2 bg-slate-900 rounded-lg p-3 border border-slate-700 max-h-96 overflow-y-auto">
-                  {bundleServices.length === 0 ? (
-                    <p className="text-slate-500 text-sm">No hay servicios en este bundle</p>
-                  ) : (
-                    bundleServices.map((service: any) => (
-                      <div key={service.id} className="flex items-center justify-between p-2 bg-slate-800 rounded">
-                        <div className="flex-1">
-                          <p className="text-slate-200 text-sm">{service.service_name}</p>
-                          <p className="text-slate-400 text-xs">{money(service.price)}</p>
-                        </div>
-                        <button
-                          onClick={() => {
-                            removeServiceFromBundleMutation.mutate({
-                              bundleId: selectedBundle.id,
-                              serviceId: service.id
-                            });
-                          }}
-                          className="px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700 transition-colors"
-                        >
-                          Quitar
-                        </button>
+                    <div>
+                      <p className="font-medium text-slate-200">{service.service_name}</p>
+                      {service.description && (
+                        <p className="text-sm text-slate-400 mt-1">{service.description}</p>
+                      )}
+                      <div className="flex items-center gap-3 mt-2 text-xs">
+                        <span className="text-slate-500">{money(service.price)}/mes</span>
+                        {completedTasks > 0 && (
+                          <span className="text-green-400">{completedTasks} completadas</span>
+                        )}
+                        {pendingTasks > 0 && (
+                          <span className="text-yellow-400">{pendingTasks} pendientes</span>
+                        )}
                       </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* Servicios disponibles */}
-              <div>
-                <h3 className="text-sm font-medium text-slate-300 mb-2">Servicios disponibles</h3>
-                <div className="space-y-2 bg-slate-900 rounded-lg p-3 border border-slate-700 max-h-96 overflow-y-auto">
-                  {clientServices.filter((s: any) => !s.bundle_id || s.bundle_id === selectedBundle.id).length === 0 ? (
-                    <p className="text-slate-500 text-sm">No hay servicios disponibles</p>
-                  ) : (
-                    clientServices
-                      .filter((s: any) => !s.bundle_id)
-                      .map((service: any) => (
-                        <div key={service.id} className="flex items-center justify-between p-2 bg-slate-800 rounded">
-                          <div className="flex-1">
-                            <p className="text-slate-200 text-sm">{service.service_name}</p>
-                            <p className="text-slate-400 text-xs">{money(service.price)}</p>
-                          </div>
-                          <button
-                            onClick={() => {
-                              addServiceToBundleMutation.mutate({
-                                bundleId: selectedBundle.id,
-                                serviceId: service.id
-                              });
-                            }}
-                            className="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 transition-colors"
-                          >
-                            Agregar
-                          </button>
-                        </div>
-                      ))
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex justify-end mt-6">
-              <button
-                onClick={() => {
-                  setShowManageServicesModal(false);
-                  setSelectedBundle(null);
-                }}
-                className="px-4 py-2 bg-slate-700 text-slate-200 rounded-lg hover:bg-slate-600 transition-colors"
-              >
-                Cerrar
-              </button>
-            </div>
-          </div>
+                    </div>
+                  </div>
+                  <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              );
+            })
+          )}
         </div>
-      )}
 
-      {/* Modal Crear Infracción */}
-      {showCreateInfractionModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-slate-800 rounded-lg p-6 w-full max-w-md border border-slate-700">
-            <h2 className="text-xl font-semibold mb-4 text-white">Agregar Infracción</h2>
+        {/* Modal de desactivación */}
+        {showDeactivateModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-slate-800 rounded-lg p-6 w-full max-w-md border border-slate-700">
+              <h2 className="text-xl font-semibold mb-4 text-white">Desactivar Cliente</h2>
 
-            <div className="space-y-4">
-              <div>
+              <div className="mb-4">
                 <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Motivo de la Infracción
+                  Motivo de desactivación
                 </label>
                 <textarea
-                  value={infractionForm.reason}
-                  onChange={(e) => setInfractionForm({ ...infractionForm, reason: e.target.value })}
+                  value={deactivationReason}
+                  onChange={(e) => {
+                    setDeactivationReason(e.target.value);
+                    setError("");
+                  }}
                   className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-white"
                   rows={4}
-                  placeholder="Ej: Cliente no ha pagado facturas de los últimos 3 meses"
+                  placeholder="Ingresa el motivo..."
                 />
+                {error && <p className="text-red-400 text-sm mt-1">{error}</p>}
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Factura Relacionada (opcional)
-                </label>
-                <select
-                  value={infractionForm.relatedInvoiceId}
-                  onChange={(e) => setInfractionForm({ ...infractionForm, relatedInvoiceId: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-white"
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowDeactivateModal(false);
+                    setDeactivationReason("");
+                    setError("");
+                  }}
+                  className="flex-1 px-4 py-2 bg-slate-700 text-slate-200 rounded-lg hover:bg-slate-600 transition-colors"
                 >
-                  <option value="">Sin factura relacionada</option>
-                  {invoices.map((inv) => (
-                    <option key={inv.id} value={inv.id}>
-                      {inv.invoice_month}/{inv.invoice_year} - {money(inv.total_due)}
-                    </option>
-                  ))}
-                </select>
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleDeactivate}
+                  disabled={deactivateMutation.isPending}
+                  className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
+                >
+                  {deactivateMutation.isPending ? "Desactivando..." : "Confirmar"}
+                </button>
               </div>
-            </div>
-
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => {
-                  setShowCreateInfractionModal(false);
-                  setInfractionForm({ reason: "", relatedInvoiceId: "" });
-                }}
-                className="flex-1 px-4 py-2 bg-slate-700 text-slate-200 rounded-lg hover:bg-slate-600 transition-colors"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleCreateInfraction}
-                disabled={createInfractionMutation.isPending}
-                className="flex-1 px-4 py-2 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-lg hover:from-orange-700 hover:to-amber-700 transition-all disabled:opacity-50"
-              >
-                {createInfractionMutation.isPending ? "Creando..." : "Crear Infracción"}
-              </button>
             </div>
           </div>
+        )}
+      </div>
+    );
+  }
+
+  // Vista de meses
+  if (viewMode === 'months' && selectedService) {
+    return (
+      <div className="p-6 space-y-6">
+        {/* Header */}
+        <div className="flex items-center gap-4">
+          <button
+            onClick={handleBack}
+            className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-700 transition-colors"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <div>
+            <h1 className="text-2xl font-semibold text-white">{selectedService.service_name}</h1>
+            <p className="text-sm text-slate-400">{client?.full_name}</p>
+          </div>
         </div>
-      )}
-    </div>
-  );
+
+        {/* Lista de meses */}
+        <div className="space-y-3">
+          {monthsWithTasks.map((monthData) => (
+            <button
+              key={`${monthData.year}-${monthData.month}`}
+              onClick={() => handleMonthClick(monthData)}
+              className={`w-full bg-slate-900 border rounded-xl p-4 flex items-center justify-between transition-colors text-left ${
+                monthData.hasCompletedTasks
+                  ? 'border-green-800/50 hover:border-green-600'
+                  : monthData.tasks.length > 0
+                    ? 'border-yellow-800/50 hover:border-yellow-600'
+                    : 'border-slate-700 hover:border-slate-600'
+              }`}
+            >
+              <div className="flex items-center gap-4">
+                <div className={`p-3 rounded-lg ${
+                  monthData.hasCompletedTasks
+                    ? 'bg-green-900/30'
+                    : monthData.tasks.length > 0
+                      ? 'bg-yellow-900/30'
+                      : 'bg-slate-800'
+                }`}>
+                  <svg className={`w-6 h-6 ${
+                    monthData.hasCompletedTasks
+                      ? 'text-green-400'
+                      : monthData.tasks.length > 0
+                        ? 'text-yellow-400'
+                        : 'text-slate-500'
+                  }`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="font-medium text-slate-200">{monthData.label}</p>
+                  <div className="flex items-center gap-3 mt-1 text-xs">
+                    {monthData.tasks.length === 0 ? (
+                      <span className="text-slate-500">Sin tareas</span>
+                    ) : (
+                      <>
+                        <span className={monthData.hasCompletedTasks ? 'text-green-400' : 'text-yellow-400'}>
+                          {monthData.tasks.filter(t => t.status === 'completed').length} completadas
+                        </span>
+                        {monthData.hasFiles && (
+                          <span className="text-blue-400 flex items-center gap-1">
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                            </svg>
+                            Archivos
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Vista de detalle del mes
+  if (viewMode === 'detail' && selectedMonth && selectedService) {
+    return (
+      <div className="p-6 space-y-6">
+        {/* Header */}
+        <div className="flex items-center gap-4">
+          <button
+            onClick={handleBack}
+            className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-700 transition-colors"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <div>
+            <h1 className="text-2xl font-semibold text-white">{selectedMonth.label}</h1>
+            <p className="text-sm text-slate-400">{selectedService.service_name} - {client?.full_name}</p>
+          </div>
+        </div>
+
+        {/* Tareas del mes */}
+        {selectedMonth.tasks.length === 0 ? (
+          <div className="bg-slate-900 rounded-xl border border-slate-700 p-8 text-center">
+            <svg className="w-12 h-12 mx-auto text-slate-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <p className="text-slate-400">No hay tareas para este mes</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {selectedMonth.tasks.map(task => (
+              <div
+                key={task.id}
+                className={`bg-slate-900 rounded-xl border p-4 ${
+                  task.status === 'completed'
+                    ? task.client_approved === true
+                      ? 'border-green-800/50'
+                      : task.client_approved === false
+                        ? 'border-red-800/50'
+                        : 'border-blue-800/50'
+                    : 'border-yellow-800/50'
+                }`}
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-2">
+                      <h3 className="font-medium text-slate-200">{task.task_name}</h3>
+                      <span className={`text-xs px-2 py-1 rounded-full ${
+                        task.status === 'completed'
+                          ? task.client_approved === true
+                            ? 'bg-green-900/50 text-green-300 border border-green-800'
+                            : task.client_approved === false
+                              ? 'bg-red-900/50 text-red-300 border border-red-800'
+                              : 'bg-blue-900/50 text-blue-300 border border-blue-800'
+                          : 'bg-yellow-900/50 text-yellow-300 border border-yellow-800'
+                      }`}>
+                        {task.status === 'completed'
+                          ? task.client_approved === true
+                            ? 'Aprobado'
+                            : task.client_approved === false
+                              ? 'Rechazado'
+                              : 'Completado'
+                          : 'Pendiente'
+                        }
+                      </span>
+                    </div>
+
+                    {task.completion_date && (
+                      <p className="text-xs text-slate-400">
+                        Completado: {new Date(task.completion_date).toLocaleDateString('es-GT', {
+                          day: '2-digit', month: 'long', year: 'numeric'
+                        })}
+                      </p>
+                    )}
+
+                    {task.client_rejection_reason && (
+                      <div className="mt-2 p-2 bg-red-900/20 border border-red-800 rounded text-sm text-red-300">
+                        <span className="font-medium">Motivo de rechazo:</span> {task.client_rejection_reason}
+                      </div>
+                    )}
+                  </div>
+
+                  {task.file_path && (
+                    <div className="flex gap-2">
+                      <a
+                        href={`${api.defaults.baseURL}/files/${task.file_path}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                        title="Ver archivo"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                      </a>
+                      <button
+                        onClick={() => handleDownload(task.file_path!, task.task_name)}
+                        className="p-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
+                        title="Descargar"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return null;
 }

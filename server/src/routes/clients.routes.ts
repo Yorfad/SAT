@@ -21,6 +21,7 @@ import {
   rejectTask,
   requestService,
   getAvailableServices,
+  getClientHistory,
   resetClientPassword
 } from "../controllers/client.controller";
 
@@ -54,6 +55,7 @@ notes: z.string().optional()
 
 
 router.get("/:id/services", requireRoles("admin","employee"), listClientServices);
+router.get("/:id/history", requireRoles("admin","employee"), getClientHistory);
 router.post("/:id/services", requireRoles("admin","employee"), validate(z.object({ body: z.object({
 service_id: z.number(),
 custom_price: z.number().optional(),

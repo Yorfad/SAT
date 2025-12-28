@@ -600,6 +600,73 @@ export async function getAvailableServices(req: Request, res: Response) {
 }
 
 /**
+ * GET /clients/:id/history
+ * Obtiene el historial de tareas completadas de un cliente específico (para admin)
+ * Agrupa las tareas por servicio y mes
+ */
+export async function getClientHistory(req: Request, res: Response) {
+  try {
+    const { id } = req.params;
+
+    // Verificar que el cliente existe
+    const [[client]]: any = await req.db!.query(
+      'SELECT id, full_name, is_active FROM users WHERE id = ? AND role = "client"',
+      [id]
+    );
+
+    if (!client) {
+      return res.status(404).json({ message: 'Cliente no encontrado' });
+    }
+
+    // Obtener todas las tareas del cliente agrupadas
+    const [tasks]: any = await req.db!.query(
+      `SELECT
+        msc.id,
+        msc.task_name,
+        msc.status,
+        msc.file_path,
+        msc.client_approved,
+        msc.client_approved_at,
+        msc.client_rejection_reason,
+        msc.completion_date,
+        msc.files_uploaded_at,
+        msc.service_id,
+        mi.invoice_month,
+        mi.invoice_year,
+        mi.id as invoice_id,
+        s.service_name,
+        s.description as service_description
+      FROM monthly_service_checklist msc
+      JOIN monthly_invoices mi ON mi.id = msc.invoice_id
+      LEFT JOIN services s ON s.id = msc.service_id
+      WHERE mi.client_user_id = ?
+      ORDER BY s.service_name, mi.invoice_year DESC, mi.invoice_month DESC`,
+      [id]
+    );
+
+    // Obtener los servicios activos del cliente
+    const [services]: any = await req.db!.query(
+      `SELECT cs.id, cs.service_id, s.service_name, s.description,
+              COALESCE(cs.custom_price, s.default_price) AS price, cs.status
+       FROM client_services cs
+       JOIN services s ON s.id = cs.service_id
+       WHERE cs.client_user_id = ? AND cs.status = 'active'
+       ORDER BY s.service_name`,
+      [id]
+    );
+
+    res.json({
+      client,
+      services,
+      tasks
+    });
+  } catch (error: any) {
+    console.error('Error getting client history:', error);
+    res.status(500).json({ message: 'Error al obtener historial', error: error.message });
+  }
+}
+
+/**
  * POST /clients/:id/reset-password
  * Genera una contraseña temporal que el cliente DEBE cambiar al iniciar sesión
  * Solo accesible por admin/superadmin

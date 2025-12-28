@@ -131,22 +131,6 @@ export default function AppLayout() {
               </NavLink>
 
               <NavLink
-                to="/admin/historial"
-                className={({ isActive }) =>
-                  `flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
-                    isActive
-                      ? "bg-gradient-to-r from-orange-600 to-amber-600 text-white shadow-lg shadow-orange-900/50"
-                      : "text-slate-300 hover:bg-slate-800 hover:text-white"
-                  }`
-                }
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Historial
-              </NavLink>
-
-              <NavLink
                 to="/admin/clients"
                 className={({ isActive }) =>
                   `flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
@@ -295,21 +279,6 @@ export default function AppLayout() {
                 Tareas Pendientes
               </NavLink>
 
-              <NavLink
-                to="/admin/historial"
-                className={({ isActive }) =>
-                  `flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
-                    isActive
-                      ? "bg-gradient-to-r from-orange-600 to-amber-600 text-white shadow-lg shadow-orange-900/50"
-                      : "text-slate-300 hover:bg-slate-800 hover:text-white"
-                  }`
-                }
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Historial
-              </NavLink>
             </>
           )}
 
