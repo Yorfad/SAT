@@ -241,16 +241,13 @@ LOCK TABLES `client_infractions` WRITE;
 /*!40000 ALTER TABLE `client_infractions` DISABLE KEYS */;
 INSERT INTO `client_infractions` VALUES
 (1,NULL,317,'manual','gay',NULL,1,0,1,'2025-12-27 19:32:49','gay','2025-12-27 17:36:26'),
-(2,3,317,'manual','por gay',NULL,1,1,NULL,NULL,NULL,'2025-12-28 04:14:09'),
-(3,3,317,'manual','por ser mas gay',NULL,1,1,NULL,NULL,NULL,'2025-12-28 04:14:23'),
-(4,3,317,'manual','por super gay',NULL,1,1,NULL,NULL,NULL,'2025-12-28 04:14:37'),
-(5,3,317,'manual','clientes extremadamente gay\n',NULL,1,1,NULL,NULL,NULL,'2025-12-28 04:14:52'),
-(6,3,317,'manual','ultragay',NULL,1,1,NULL,NULL,NULL,'2025-12-28 04:33:35'),
+(2,3,317,'manual','por gay',NULL,1,0,1,'2025-12-28 17:55:20','Resuelta por administrador','2025-12-28 04:14:09'),
+(3,3,317,'manual','por ser mas gay',NULL,1,0,1,'2025-12-28 17:55:18','Resuelta por administrador','2025-12-28 04:14:23'),
+(4,3,317,'manual','por super gay',NULL,1,0,1,'2025-12-28 17:55:13','Resuelta por administrador','2025-12-28 04:14:37'),
+(5,3,317,'manual','clientes extremadamente gay\n',NULL,1,0,1,'2025-12-28 17:55:10','Resuelta por administrador','2025-12-28 04:14:52'),
+(6,3,317,'manual','ultragay',NULL,1,0,1,'2025-12-28 17:55:07','Resuelta por administrador','2025-12-28 04:33:35'),
 (8,3,3,'manual','Test infraccion 1',NULL,1,1,NULL,NULL,NULL,'2025-12-28 05:23:23'),
-(9,3,3,'manual','Test infraccion 2',NULL,1,1,NULL,NULL,NULL,'2025-12-28 05:23:23'),
-(10,1,349,'manual','Primera infracci�n de prueba',NULL,1,1,NULL,NULL,NULL,'2025-12-28 05:42:55'),
-(11,1,349,'manual','Segunda infracci�n de prueba',NULL,1,1,NULL,NULL,NULL,'2025-12-28 05:46:17'),
-(12,1,351,'manual','Infraccion de prueba nivel 1',NULL,1,1,NULL,NULL,NULL,'2025-12-28 05:54:18');
+(9,3,3,'manual','Test infraccion 2',NULL,1,1,NULL,NULL,NULL,'2025-12-28 05:23:23');
 /*!40000 ALTER TABLE `client_infractions` ENABLE KEYS */;
 UNLOCK TABLES;
 /*!50003 SET @saved_cs_client      = @@character_set_client */ ;
@@ -430,14 +427,11 @@ CREATE TABLE `client_payments` (
 LOCK TABLES `client_payments` WRITE;
 /*!40000 ALTER TABLE `client_payments` DISABLE KEYS */;
 INSERT INTO `client_payments` VALUES
-(1,351,1,100.00,'cash','advance','Pago de prueba',NULL,1,0.00,100.00,'2025-12-28','2025-12-28 06:32:52'),
-(2,349,1,50.00,'cash','advance','Abono a cuenta de cliente desactivado',NULL,1,0.00,50.00,'2025-12-28','2025-12-28 06:33:52'),
 (3,3,1,100.00,'cash','regular','Pago mensual + anticipo',NULL,1,0.00,100.00,'2025-01-15','2025-12-28 07:01:44'),
 (4,4,1,100.00,'cash','regular','Pago mensual + anticipo',NULL,1,0.00,100.00,'2025-01-15','2025-12-28 07:01:44'),
 (5,5,1,100.00,'cash','regular','Pago mensual + anticipo',NULL,1,0.00,100.00,'2025-01-15','2025-12-28 07:01:44'),
 (6,6,1,100.00,'cash','regular','Pago mensual + anticipo',NULL,1,0.00,100.00,'2025-01-15','2025-12-28 07:01:45'),
-(7,3,1,75.00,'cash','regular','Test fix bug 1',NULL,1,50.00,125.00,'2025-02-15','2025-12-28 07:09:10'),
-(8,349,1,50.00,'cash','regular','Pago cliente desactivado',NULL,1,50.00,100.00,'2025-01-20','2025-12-28 07:16:25');
+(7,3,1,75.00,'cash','regular','Test fix bug 1',NULL,1,50.00,125.00,'2025-02-15','2025-12-28 07:09:10');
 /*!40000 ALTER TABLE `client_payments` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -1056,7 +1050,7 @@ INSERT INTO `clients_profiles` VALUES
 (313,3,'570','Ant2025$$:p',NULL,'5453 4166',NULL,5.00,NULL,0,0,'Central',NULL,NULL,NULL,0.00),
 (315,3,'579','Jorge.1997',NULL,'5729-5583 3972-5719',NULL,5.00,NULL,0,0,'Central',NULL,NULL,NULL,0.00),
 (316,3,'571','Marlon.1997',NULL,'5581-0390',NULL,5.00,NULL,0,0,'Central',NULL,NULL,NULL,0.00),
-(317,3,NULL,'Guate.2022',NULL,'nogueraaroche11@gmail.com',NULL,5.00,NULL,0,5,NULL,NULL,NULL,NULL,0.00),
+(317,3,NULL,'Guate.2022',NULL,'nogueraaroche11@gmail.com',NULL,5.00,NULL,0,0,NULL,NULL,NULL,NULL,0.00),
 (319,3,'Firma Electronica','Nit',NULL,'Fecha de nacimiento',NULL,5.00,NULL,0,0,NULL,NULL,NULL,NULL,0.00),
 (320,3,'482470Ma$','100431925',NULL,'36478',NULL,5.00,NULL,0,0,NULL,NULL,NULL,NULL,0.00),
 (321,3,'Salvador.1983$','48861537',NULL,'30641',NULL,5.00,NULL,0,0,NULL,NULL,NULL,NULL,0.00),
@@ -1081,11 +1075,7 @@ INSERT INTO `clients_profiles` VALUES
 (343,3,'1091','Betzabe.2018',NULL,NULL,NULL,5.00,NULL,0,0,'Central',NULL,NULL,NULL,0.00),
 (344,3,'944','Habdalayunes96.',NULL,NULL,NULL,5.00,NULL,0,0,NULL,NULL,NULL,NULL,0.00),
 (345,3,'1090','@Alejandra2007',NULL,NULL,NULL,5.00,NULL,0,0,NULL,NULL,NULL,NULL,0.00),
-(346,3,'1077','Melvin/1998',NULL,NULL,NULL,5.00,NULL,0,0,'Central',NULL,NULL,NULL,0.00),
-(349,1,NULL,NULL,NULL,'55551234',NULL,5.00,NULL,0,2,NULL,NULL,NULL,NULL,50.00),
-(350,1,NULL,NULL,NULL,NULL,NULL,5.00,NULL,0,0,NULL,NULL,NULL,NULL,0.00),
-(351,1,NULL,NULL,NULL,NULL,NULL,5.00,NULL,0,1,NULL,NULL,NULL,NULL,100.00),
-(352,1,NULL,NULL,NULL,NULL,NULL,5.00,NULL,0,0,NULL,NULL,NULL,NULL,0.00);
+(346,3,'1077','Melvin/1998',NULL,NULL,NULL,5.00,NULL,0,0,'Central',NULL,NULL,NULL,0.00);
 /*!40000 ALTER TABLE `clients_profiles` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -1450,7 +1440,6 @@ INSERT INTO `monthly_invoices` VALUES
 (9,1,4,2025,2,0.00,0.00,0.00,NULL,50.00,0.00,50.00,'pending',NULL,'2025-02-28','2025-12-28 07:03:56',NULL,NULL,NULL),
 (10,1,5,2025,2,0.00,0.00,0.00,NULL,50.00,0.00,50.00,'pending',NULL,'2025-02-28','2025-12-28 07:03:56',NULL,NULL,NULL),
 (11,1,6,2025,2,0.00,0.00,0.00,NULL,50.00,0.00,50.00,'pending',NULL,'2025-02-28','2025-12-28 07:03:56',NULL,NULL,NULL),
-(12,1,349,2025,1,0.00,0.00,0.00,NULL,100.00,50.00,50.00,'partial',NULL,'2025-01-31','2025-12-28 07:16:09',NULL,1,'2025-12-28 07:16:25'),
 (13,NULL,4,2025,3,0.00,50.00,0.00,NULL,50.00,50.00,0.00,'paid',NULL,NULL,'2025-12-28 07:24:44',NULL,NULL,NULL),
 (14,NULL,5,2025,3,0.00,50.00,0.00,NULL,50.00,50.00,0.00,'paid',NULL,NULL,'2025-12-28 07:24:44',NULL,NULL,NULL),
 (15,NULL,6,2025,3,0.00,50.00,0.00,NULL,50.00,50.00,0.00,'paid',NULL,NULL,'2025-12-28 07:24:44',NULL,NULL,NULL);
@@ -3138,11 +3127,7 @@ INSERT INTO `user_workspaces` VALUES
 (345,345,3,'viewer',0,NULL,'2025-12-26 21:49:27'),
 (346,346,3,'viewer',0,NULL,'2025-12-26 21:49:27'),
 (347,1,3,'owner',0,NULL,'2025-12-26 21:50:00'),
-(1042,1,4,'owner',0,1,'2025-12-27 04:21:09'),
-(1043,349,1,'member',0,NULL,'2025-12-28 05:42:13'),
-(1044,350,1,'member',0,NULL,'2025-12-28 05:54:01'),
-(1045,351,1,'member',0,NULL,'2025-12-28 05:54:18'),
-(1046,352,1,'member',0,NULL,'2025-12-28 06:21:38');
+(1042,1,4,'owner',0,1,'2025-12-27 04:21:09');
 /*!40000 ALTER TABLE `user_workspaces` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -3472,7 +3457,7 @@ INSERT INTO `users` VALUES
 (313,'fantonior1960@gmail.com','$2a$10$Qd0rV.z.onF8GbbQgTFDoeaEHwQmlaRaNM5OvzqqhJhaU7rJ4tDPq','Antonio Flores Reyes','client','19452713',NULL,'5453 4166',1,'2025-12-26 21:49:24',NULL,NULL,NULL,NULL,0,NULL,NULL,1,NULL,NULL,NULL),
 (315,'garciajorgemartinez00@gmail.com','$2a$10$7hgnoVUypsQqiDFUPHzI3eD056AnT81D0yiEy8KtqOsOgJIeo8M56','Domingo Garcia','client','109904893',NULL,'5729-5583 3972-5719',1,'2025-12-26 21:49:24',NULL,NULL,NULL,NULL,0,NULL,NULL,1,NULL,NULL,NULL),
 (316,'marlonedfrans@gmail.com','$2a$10$.seDmYcAAJH7Dl8mfjtTB.p.2yZR/KvGmiruFpRa1JP2MlY3QCnGC','Marlon Edfrans Garcia Mejia','client','99292149',NULL,'5581-0390',1,'2025-12-26 21:49:24',NULL,NULL,NULL,NULL,0,NULL,NULL,1,NULL,NULL,NULL),
-(317,'24355','$2a$10$AZypf7Ku14oRWdBx5dKO2.u2A0r8ztoZBkPfvUAg9FIFdGlpx9u.y','4128 4091','client','7129459',NULL,'nogueraaroche11@gmail.com',0,'2025-12-26 21:49:24',NULL,'Desactivado automáticamente por alcanzar 5 infracciones activas','2025-12-28 04:33:36',NULL,1,NULL,NULL,1,NULL,NULL,NULL),
+(317,'24355','$2a$10$AZypf7Ku14oRWdBx5dKO2.u2A0r8ztoZBkPfvUAg9FIFdGlpx9u.y','4128 4091','client','7129459',NULL,'nogueraaroche11@gmail.com',1,'2025-12-26 21:49:24',NULL,'Desactivado automáticamente por alcanzar 5 infracciones activas','2025-12-28 04:33:36',NULL,0,NULL,NULL,1,NULL,NULL,NULL),
 (319,'Telefono','$2a$10$jTyBZ07ASX/WW78dqK7yXe3ZrUr5QAZxfe0O41dJ/wbkfwTdIGh5a','Nombre','client','Correo',NULL,'Fecha de nacimiento',1,'2025-12-26 21:49:25',NULL,NULL,NULL,NULL,0,NULL,NULL,1,NULL,NULL,NULL),
 (320,'4041-1536','$2a$10$/3JvTWmlC.AgwCZM2dKne.9XzOT/68/YzoeMxG7E3rbIN6j/VFxAK','Lizardo Gabriel Tash Giron','client','gagiron18@gmail.com',NULL,'36478',1,'2025-12-26 21:49:25',NULL,NULL,NULL,NULL,0,NULL,NULL,1,NULL,NULL,NULL),
 (321,'4777-7741','$2a$10$HyJ/5d6F4oAiuxRwAQyTheD9FSAgOamRNV3atHrUON.I3tCg33STy','Salvador Chub Coc','client','chubsoliver@gmail.com',NULL,'30641',1,'2025-12-26 21:49:25',NULL,NULL,NULL,NULL,0,NULL,NULL,1,NULL,NULL,NULL),
@@ -3497,11 +3482,7 @@ INSERT INTO `users` VALUES
 (343,'sicalismael25@gmail.com','$2a$10$6XgZkD98/3HtJVr5JONqA.4tEVhzqKU72fEANO8.Er0d4KND8zq8y','Ismael Sical Xitumul','client','1603869k',NULL,NULL,1,'2025-12-26 21:49:27',NULL,NULL,NULL,NULL,0,NULL,NULL,1,NULL,NULL,NULL),
 (344,'habdalayunes@gmail.com','$2a$10$mvJlo0darvR6nxJrSHN.a.HulO9YCI2E7R4EDxa1gR4UaXoLTl38q','Jorge Habdala Yunes','client','93941331',NULL,NULL,1,'2025-12-26 21:49:27',NULL,NULL,NULL,NULL,0,NULL,NULL,1,NULL,NULL,NULL),
 (345,'ialeaquinno@gmail.com','$2a$10$yxOV4t2kdF2wGMYfgBtrz.7wfIpdPlaia70ybPXahN6OPvYvP9Ijm','Esthefany Alejandra Aquino Alfaro','client','305086200',NULL,NULL,1,'2025-12-26 21:49:27',NULL,NULL,NULL,NULL,0,NULL,NULL,1,NULL,NULL,NULL),
-(346,'arguetamelvin34@gmail.com','$2a$10$Ard7LSiJrF4arbq4bro6Yu/CDX.78sv8wSqmp7JnxK2Xc65Ge1ZCi','Melvin Onán, Argueta Corado','client','104448547',NULL,NULL,1,'2025-12-26 21:49:27',NULL,NULL,NULL,NULL,0,NULL,NULL,1,NULL,NULL,NULL),
-(349,'test.autodeactivate@test.com','$2a$10$r39mo6cJqGsi5YcJN/i8Xe2wJBz73LX3Id6HzZZIuWvY.eC9inU22','Cliente Prueba AutoDesactivar','client','1234567890',NULL,NULL,0,'2025-12-28 05:42:13',NULL,'Desactivado automáticamente por alcanzar 2 infracciones activas','2025-12-28 05:46:17',NULL,0,NULL,NULL,0,NULL,NULL,NULL),
-(350,'test.nivel0@test.com','$2a$10$JR4sW0CX0MFaJ.CPg/PMfuhu/BsWjmYuD/9HN8lzfS34hlX0RZ.WG','Test Color Nivel 0 (Sin infracciones)','client',NULL,NULL,NULL,1,'2025-12-28 05:54:01',NULL,NULL,NULL,NULL,0,NULL,NULL,0,NULL,NULL,NULL),
-(351,'test.nivel1@test.com','$2a$10$sBcbpveV0n8J1ZNnWPDvPOwEoAzU8swTspEXuXETW57x7uQH.k3iy','Test Color Nivel 1 (1 infraccion)','client',NULL,NULL,NULL,1,'2025-12-28 05:54:18',NULL,NULL,NULL,NULL,0,NULL,NULL,0,NULL,NULL,NULL),
-(352,'test.manual@test.com','$2a$10$J.J.5sdAsGhjDMbeeGPybu1ah834qaALOt8pi.AT/DteuR0l18d26','Test Desactivacion Manual','client',NULL,NULL,NULL,0,'2025-12-28 06:21:37',NULL,'Prueba de desactivacion manual','2025-12-28 06:22:13',1,0,NULL,NULL,0,NULL,NULL,NULL);
+(346,'arguetamelvin34@gmail.com','$2a$10$Ard7LSiJrF4arbq4bro6Yu/CDX.78sv8wSqmp7JnxK2Xc65Ge1ZCi','Melvin Onán, Argueta Corado','client','104448547',NULL,NULL,1,'2025-12-26 21:49:27',NULL,NULL,NULL,NULL,0,NULL,NULL,1,NULL,NULL,NULL);
 /*!40000 ALTER TABLE `users` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -3579,4 +3560,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-12-28 17:07:55
+-- Dump completed on 2025-12-28 20:35:50

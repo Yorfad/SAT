@@ -425,6 +425,16 @@ export default function ClientsPage() {
     return luminance > 0.5;
   };
 
+  // Helper para oscurecer un color hex (factor 0-1, donde 0.8 = 20% más oscuro)
+  const darkenColor = (hexColor: string, factor: number = 0.8): string => {
+    if (!hexColor || hexColor === 'transparent') return hexColor;
+    const hex = hexColor.replace('#', '');
+    const r = Math.round(parseInt(hex.substring(0, 2), 16) * factor);
+    const g = Math.round(parseInt(hex.substring(2, 4), 16) * factor);
+    const b = Math.round(parseInt(hex.substring(4, 6), 16) * factor);
+    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+  };
+
   const toggleAllClients = () => {
     if (selectedClients.length === clients.length) {
       setSelectedClients([]);
@@ -692,10 +702,8 @@ export default function ClientsPage() {
                   const infStyle = getInfractionStyle(client.active_infractions_count || 0);
                   const hasInfractions = (client.active_infractions_count || 0) > 0;
 
-                  // Clases para botones en filas claras
-                  const actionBtnClass = infStyle.isLight
-                    ? 'px-1.5 py-0.5 rounded bg-slate-800/80 border border-slate-600'
-                    : '';
+                  // Color más oscuro para elementos interactivos (botones, selects)
+                  const darkerBg = hasInfractions ? darkenColor(infStyle.bg, 0.85) : undefined;
 
                   return (
                   <tr
@@ -732,15 +740,12 @@ export default function ClientsPage() {
                           const userId = e.target.value ? parseInt(e.target.value) : null;
                           assignMutation.mutate({ clientId: client.id, userId });
                         }}
-                        className={`px-2 py-1 rounded text-sm ${
-                          infStyle.isLight
-                            ? 'bg-slate-800 border border-slate-500 text-white'
-                            : 'bg-slate-800 border border-slate-600 text-white'
-                        }`}
+                        style={hasInfractions ? { backgroundColor: darkerBg, color: infStyle.text, borderColor: darkenColor(infStyle.bg, 0.7) } : undefined}
+                        className={`px-2 py-1 rounded text-sm border ${!hasInfractions ? 'bg-slate-800 border-slate-600 text-white' : ''}`}
                       >
-                        <option value="">Pool</option>
+                        <option value="" style={hasInfractions ? { backgroundColor: darkerBg, color: infStyle.text } : undefined}>Pool</option>
                         {employees.map((emp: Employee) => (
-                          <option key={emp.id} value={emp.id}>{emp.full_name}</option>
+                          <option key={emp.id} value={emp.id} style={hasInfractions ? { backgroundColor: darkerBg, color: infStyle.text } : undefined}>{emp.full_name}</option>
                         ))}
                       </select>
                     </td>
@@ -752,19 +757,22 @@ export default function ClientsPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <div className={`inline-flex justify-center gap-1 ${infStyle.isLight ? 'bg-slate-800/90 rounded-lg px-2 py-1 border border-slate-600' : ''}`}>
+                      <div
+                        className="inline-flex justify-center gap-1 rounded-lg px-2 py-1"
+                        style={hasInfractions ? { backgroundColor: darkerBg } : undefined}
+                      >
                         <button
                           onClick={() => handleEditProfile(client)}
-                          className={`text-sm hover:opacity-80 ${actionBtnClass}`}
-                          style={{ color: infStyle.isLight ? '#60A5FA' : undefined }}
+                          className="text-sm hover:opacity-70 px-1"
+                          style={{ color: infStyle.text }}
                           title="Editar"
                         >
                           ✏️
                         </button>
                         <button
                           onClick={() => handleResetPassword(client)}
-                          className={`text-sm hover:opacity-80 ${actionBtnClass}`}
-                          style={{ color: infStyle.isLight ? '#FBBF24' : undefined }}
+                          className="text-sm hover:opacity-70 px-1"
+                          style={{ color: infStyle.text }}
                           title="Restablecer Contraseña"
                         >
                           🔑
@@ -775,8 +783,8 @@ export default function ClientsPage() {
                               setInfractionClient(client);
                               setShowInfractionModal(true);
                             }}
-                            className={`text-sm hover:opacity-80 ${actionBtnClass}`}
-                            style={{ color: infStyle.isLight ? '#F87171' : undefined }}
+                            className="text-sm hover:opacity-70 px-1"
+                            style={{ color: infStyle.text }}
                             title="Registrar Infraccion"
                           >
                             ⚠️
@@ -788,8 +796,8 @@ export default function ClientsPage() {
                               setHistoryClient(client);
                               setShowHistoryModal(true);
                             }}
-                            className={`text-sm hover:opacity-80 flex items-center gap-1 ${actionBtnClass}`}
-                            style={{ color: infStyle.isLight ? '#FB923C' : undefined }}
+                            className="text-sm hover:opacity-70 flex items-center gap-1 px-1"
+                            style={{ color: infStyle.text }}
                             title={`Ver ${client.active_infractions_count} infracción(es)`}
                           >
                             📋 <span className="font-bold">{client.active_infractions_count}</span>
