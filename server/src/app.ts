@@ -69,8 +69,11 @@ app.use(express.json({ limit: "2mb" }));
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 
 
-// Health check (sin tenant, para Docker healthcheck)
+
+// Health check (sin tenant, para Railway y Docker healthcheck)
+app.get("/health", (_req, res) => res.json({ status: "ok", timestamp: new Date().toISOString() }));
 app.get("/api/health", (_req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
+
 
 // Login móvil de clientes: NO requiere tenant (busca en todos los tenants)
 const mobileAuthLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 50 });
