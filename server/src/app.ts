@@ -43,6 +43,10 @@ import { errorHandler } from "./middleware/error";
 
 
 const app = express();
+
+// Trust proxy - Required for Railway deployment
+app.set('trust proxy', true);
+
 app.use(helmet());
 // CORS: permitir orígenes configurados + apps móviles Capacitor
 app.use(cors({
