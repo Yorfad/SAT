@@ -708,15 +708,24 @@ router.get("/:id", requireRoles("admin"), getService);
 // POST /services - Crear nuevo servicio
 router.post("/", requireRoles("admin"), validate(z.object({ body: z.object({
   service_name: z.string().min(2),
-  description: z.string().optional(),
+  description: z.string().optional().nullable(),
   default_price: z.number().nonnegative(),
+  operational_cost: z.number().nonnegative().optional(),
   recurrence_type: z.enum(['monthly', 'bimonthly', 'quarterly', 'annual', 'custom', 'one_time']).optional(),
+  recurrence_type_extended: z.enum(['monthly', 'variable']).optional(),
   recurrence_days: z.number().optional().nullable(),
   activation_day: z.number().min(1).max(31).optional().nullable(),
   activation_window_days: z.number().min(1).max(30).optional(),
   requires_file: z.boolean().optional(),
+  file_config: z.enum(['none', 'optional', 'required']).optional(),
   completion_determines_next: z.boolean().optional(),
-  is_active: z.boolean().optional()
+  is_on_request: z.boolean().optional(),
+  is_active: z.boolean().optional(),
+  employee_notes: z.string().optional().nullable(),
+  client_notes: z.string().optional().nullable(),
+  assignment_type: z.enum(['manual', 'all_clients', 'by_workspace']).optional(),
+  visible_to_clients: z.boolean().optional(),
+  allow_subscription: z.boolean().optional()
 }) })), createService);
 
 // PUT /services/:id - Actualizar servicio (parcial o completo)
@@ -724,13 +733,22 @@ router.put("/:id", requireRoles("admin"), validate(z.object({ body: z.object({
   service_name: z.string().min(2).optional(),
   description: z.string().optional().nullable(),
   default_price: z.number().nonnegative().optional(),
+  operational_cost: z.number().nonnegative().optional(),
   recurrence_type: z.enum(['monthly', 'bimonthly', 'quarterly', 'annual', 'custom', 'one_time']).optional(),
+  recurrence_type_extended: z.enum(['monthly', 'variable']).optional(),
   recurrence_days: z.number().optional().nullable(),
   activation_day: z.number().min(1).max(31).optional().nullable(),
   activation_window_days: z.number().min(1).max(30).optional(),
   requires_file: z.boolean().optional(),
+  file_config: z.enum(['none', 'optional', 'required']).optional(),
   completion_determines_next: z.boolean().optional(),
-  is_active: z.boolean().optional()
+  is_on_request: z.boolean().optional(),
+  is_active: z.boolean().optional(),
+  employee_notes: z.string().optional().nullable(),
+  client_notes: z.string().optional().nullable(),
+  assignment_type: z.enum(['manual', 'all_clients', 'by_workspace']).optional(),
+  visible_to_clients: z.boolean().optional(),
+  allow_subscription: z.boolean().optional()
 }) })), updateService);
 
 // PATCH /services/:id/status - Activar/desactivar servicio
