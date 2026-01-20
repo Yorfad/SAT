@@ -3,10 +3,13 @@ import { Capacitor } from "@capacitor/core";
 import { resolveTenant  } from "./tenant";
 
 // URL del servidor para app móvil
-// En EMULADOR Android: usar 10.0.2.2 (alias al host)
-// En DISPOSITIVO FÍSICO: usar IP local del WiFi
-// En PRODUCCIÓN: cambia a tu dominio real
-const MOBILE_API_URL = "http://172.20.10.4:3001/api";
+// En desarrollo local: usar IP local del WiFi (ej: http://192.168.1.100:3001/api)
+// En producción: usar la URL de Railway
+const MOBILE_API_URL_DEV = "http://172.20.10.4:3001/api";
+const MOBILE_API_URL_PROD = "https://sat-production-2745.up.railway.app/api";
+
+// Determina si estamos en modo desarrollo o producción
+const IS_PRODUCTION = import.meta.env.PROD;
 
 // Detecta si estamos en plataforma nativa (iOS/Android)
 function isNativePlatform(): boolean {
@@ -19,9 +22,9 @@ function isNativePlatform(): boolean {
 
 // Normaliza la baseURL y evita errores si alguien configuró /api/admin o /api/client
 function computeBaseUrl(): string {
-  // En plataforma nativa, usar la URL móvil
+  // En plataforma nativa, usar la URL móvil según el entorno
   if (isNativePlatform()) {
-    return MOBILE_API_URL;
+    return IS_PRODUCTION ? MOBILE_API_URL_PROD : MOBILE_API_URL_DEV;
   }
 
   // En web, usar ruta relativa para aprovechar el proxy de nginx
