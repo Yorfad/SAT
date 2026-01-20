@@ -4,8 +4,14 @@ export function detectTenant(): string | null {
   const [withoutPort] = host.split(":");           // "acme.localhost"
   const parts = withoutPort.split(".");            // ["acme","localhost"]
 
+  // Dominios de hosting conocidos donde el subdominio NO es un tenant real
+  const hostingDomains = ['vercel.app', 'netlify.app', 'railway.app', 'herokuapp.com', 'pages.dev'];
+  const domain = parts.slice(-2).join('.');
+  const isHostingDomain = hostingDomains.includes(domain);
+
   // subdominio real (acme.tu-dominio.com → "acme")
-  if (parts.length >= 3) {
+  // No detectar subdominio si estamos en un dominio de hosting
+  if (parts.length >= 3 && !isHostingDomain) {
     const sub = parts[0].toLowerCase();
     if (sub !== "www") return sub;
   }
